@@ -49,18 +49,15 @@ Full instructions: `memory/bootstrap.md`
 
 ## Available Skills
 
-[Add skills here as you create them in feedforward/skills/]
 - None configured yet → see `feedforward/skills/_TEMPLATE.skill.md`
 
 ## MCP Servers
 
-[Add MCP servers here when configured]
 - None configured yet → see `feedforward/mcp.config.md` (Level 2)
 
 ## Active Sensors
 
 - None (Level 1 — manual contract validation)
-- Add sensors in `feedback/sensors/` to upgrade to Level 3
 
 ---
 

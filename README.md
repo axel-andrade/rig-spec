@@ -89,14 +89,17 @@ init → research → shape → plan → run → validate → audit
 ```
 
 ```bash
-rig-spec init --retrofit        # set up on existing project
-rig-spec research "topic"       # investigate before specifying
-rig-spec shape "feature name"   # write the spec
-rig-spec plan feature-name      # break into tasks
-rig-spec run task-01            # assemble context for your AI agent
-rig-spec validate               # run all sensors
-rig-spec resume                 # pick up where you left off
-rig-spec audit                  # check for accumulated drift
+rig-spec init                          # new project — auto-detects stack
+rig-spec init --retrofit               # existing project (rules as [DRAFT])
+rig-spec init --template node-api      # force a specific template
+rig-spec research "topic"              # investigate before specifying
+rig-spec shape "feature name"          # ask 5 questions, pre-fill spec
+rig-spec plan feature-name             # break spec into tasks
+rig-spec run task-01                   # assemble context for your AI agent
+rig-spec validate                      # run all sensors
+rig-spec validate task-01              # sensors + show task contract checklist
+rig-spec resume                        # pick up where you left off
+rig-spec audit                         # check for accumulated drift
 ```
 
 > `run`, `research`, `shape`, and `plan` are **context assemblers** — they prepare and print the context so you can paste it into your AI agent of choice. No API calls are made.

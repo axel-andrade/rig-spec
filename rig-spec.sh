@@ -881,7 +881,47 @@ EOF
 Enforced by: `feedback/sensors/test.sensor.md` (Level 3)
 EOF
 
-  print_ok "feedforward/rules/ filled for Node.js stack (4 files)"
+  cat > "$RIG_DIR/feedforward/rules/structure.rules.md" << 'EOF'
+# Structure Rules — Node.js
+
+---
+
+## Folder Layout
+
+```
+src/
+├── [module]/
+│   ├── [name].controller.ts
+│   ├── [name].service.ts
+│   ├── [name].repository.ts
+│   ├── [name].dto.ts
+│   └── [name].spec.ts
+├── shared/
+│   └── [utility files]
+└── main.ts
+```
+
+## Placement Rules
+
+- Controllers live in: `src/[module]/`
+- Services live in: `src/[module]/`
+- Repositories live in: `src/[module]/`
+- Shared utilities live in: `src/shared/`
+- Tests live next to the file they test
+
+## Forbidden
+
+- Business logic files outside `src/`
+- Test files in a top-level `tests/` folder (keep them co-located)
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/structure.sensor.md` (Level 3)
+EOF
+
+  print_ok "feedforward/rules/ filled for Node.js stack (5 files)"
 }
 
 write_skills_node() {
@@ -1145,7 +1185,47 @@ EOF
 Enforced by: `feedback/sensors/test.sensor.md` (Level 3)
 EOF
 
-  print_ok "feedforward/rules/ filled for Python stack (4 files)"
+  cat > "$RIG_DIR/feedforward/rules/structure.rules.md" << 'EOF'
+# Structure Rules — Python
+
+---
+
+## Folder Layout
+
+```
+src/
+├── routers/
+│   └── [name]_router.py
+├── services/
+│   └── [name]_service.py
+├── repositories/
+│   └── [name]_repository.py
+├── models/
+│   └── [name].py
+├── schemas/
+│   └── [name]_schema.py
+└── main.py
+tests/
+├── integration/
+└── test_[name].py
+```
+
+## Placement Rules
+
+- Routers live in: `src/routers/` or `src/[module]/`
+- Services live in: `src/services/` or `src/[module]/`
+- Repositories live in: `src/repositories/` or `src/[module]/`
+- Pydantic schemas live in: `src/schemas/`
+- Tests live in: `tests/`, mirroring `src/` structure
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/structure.sensor.md` (Level 3)
+EOF
+
+  print_ok "feedforward/rules/ filled for Python stack (5 files)"
 }
 
 write_skills_python() {
@@ -1786,6 +1866,546 @@ EOF
 }
 
 # Generates AI tool entry point files at the project root.
+write_adapters() {
+  mkdir -p "$RIG_DIR/adapters"
+
+  cat > "$RIG_DIR/adapters/claude.md" << 'EOF'
+# Adapter: Claude Code
+
+> Optional. Supplements HARNESS.md with Claude Code-specific instructions.
+> HARNESS.md is always the primary entry point — this file enhances the experience.
+
+---
+
+## Entry Point
+
+When starting a session in this project, read:
+
+```
+Read .rig/HARNESS.md first, then follow the bootstrap sequence in .rig/memory/bootstrap.md
+```
+
+## Memory System
+
+Claude Code's built-in memory (`.claude/`) stores user preferences. `.rig/memory/` stores project state. They are separate:
+
+- `.claude/` — how you work with Claude across all projects
+- `.rig/memory/` — the state of this specific project
+
+## Recommended Permissions
+
+For this project, allow Claude Code to run the sensors defined in `feedback/sensors/` without prompting. Add them to `.claude/settings.local.json`:
+
+```json
+{
+  "allowedTools": [
+    "Bash(npx eslint*)",
+    "Bash(npx tsc*)",
+    "Bash(npm test*)"
+  ]
+}
+```
+
+## Two-Agent Pattern
+
+When running Level 3 (implementer + validator):
+
+1. Open a new conversation for the implementer → load `orchestration/implementer.md`
+2. Open a separate conversation for the validator → load `orchestration/validator.md`
+3. Pass the signed contract between them
+
+Claude Code Projects can maintain separate conversation threads for this.
+EOF
+
+  cat > "$RIG_DIR/adapters/gemini.md" << 'EOF'
+# Adapter: Gemini
+
+> Optional. Supplements HARNESS.md with Gemini-specific instructions.
+> HARNESS.md is always the primary entry point — this file enhances the experience.
+
+---
+
+## Entry Point
+
+At the start of every session, include in your first message:
+
+```
+Read .rig/HARNESS.md first, then follow the bootstrap sequence in .rig/memory/bootstrap.md before doing anything else.
+```
+
+## Context Window
+
+Gemini supports large context windows. For this project:
+
+- Load all rules files at session start: `.rig/feedforward/rules/`
+- Load relevant skills per task: `.rig/feedforward/skills/[skill].md`
+- Do not load all files at once — prioritize what the current task needs
+
+## Two-Agent Pattern
+
+When running Level 3 (implementer + validator):
+
+1. Use a separate Gemini session for each agent
+2. Start the implementer session with: `orchestration/implementer.md`
+3. Start the validator session with: `orchestration/validator.md`
+4. Pass the contract as a file attachment between sessions
+
+## Grounding
+
+If using Gemini with Google Search grounding, turn it off during implementation sessions. Grounding is useful for research, but implementation sessions should rely only on the project context assembled from `.rig/`.
+EOF
+
+  cat > "$RIG_DIR/adapters/antigravity.md" << 'EOF'
+# Adapter: Antigravity
+
+> Optional. Supplements HARNESS.md with Antigravity-specific instructions.
+> HARNESS.md is always the primary entry point — this file enhances the experience.
+
+---
+
+## Entry Point
+
+At the start of every session, include in your first message:
+
+```
+Read .rig/HARNESS.md first, then .rig/memory/bootstrap.md before proceeding.
+```
+
+## Skills Integration
+
+Antigravity's skill system maps directly to the rig-spec skills:
+
+- Local skills in `.rig/feedforward/skills/` → load as Antigravity skills per task
+- External skills referenced in `HARNESS.md` → load from your skill library
+
+## Two-Agent Pattern
+
+When running Level 3 (implementer + validator):
+
+1. Configure two separate Antigravity agents with different profiles
+2. Implementer agent: load `orchestration/implementer.md` as the agent profile
+3. Validator agent: load `orchestration/validator.md` as the agent profile
+4. Use Antigravity's multi-agent handoff to pass the signed contract
+
+## Sensor Hooks
+
+Configure Antigravity hooks to auto-run sensors after each task:
+
+```yaml
+on_task_complete:
+  - run: sensors/lint.sensor.md
+  - run: sensors/typecheck.sensor.md
+  - run: sensors/test.sensor.md
+```
+EOF
+
+  print_ok "adapters/ created (claude.md, gemini.md, antigravity.md)"
+}
+
+write_mcp_config() {
+  cat > "$RIG_DIR/feedforward/mcp.config.md" << 'EOF'
+# MCP Configuration
+
+> Level 2 — MCP servers available to agents in this project.
+> Agents load these only when relevant to the current task — not all at once.
+
+---
+
+## Configured Servers
+
+[Add an entry for each MCP server configured for this project.]
+
+### [server-name]
+
+**Purpose:** [What real-time context this server provides]
+**When to use:** [Which task types benefit from this server]
+**Config file:** `[path to .mcp config file]`
+
+**Usage example:**
+```
+[How the agent should invoke this server for common tasks]
+```
+
+---
+
+## Notes
+
+- MCP servers declared here supplement the static files in `.rig/` — they are not a replacement.
+- If a server is unavailable, fall back to the static files in `memory/research/`.
+- Never load all servers simultaneously — only what the current task needs.
+EOF
+  print_ok "feedforward/mcp.config.md created"
+}
+
+write_research_template() {
+  cat > "$RIG_DIR/memory/research/_TEMPLATE.research.md" << 'EOF'
+# Research: [Topic]
+
+> Output of a dedicated research session.
+> This file is the clean result — not the exploration log.
+> Implementation sessions read this instead of re-doing the research.
+
+---
+
+## Topic
+
+[What was investigated. One sentence.]
+
+## Key Findings
+
+- [Finding 1]
+- [Finding 2]
+- [Finding 3]
+
+## Relevant Files Discovered
+
+- `src/[file]` — [why it matters]
+
+## Patterns Already in Use
+
+- [Pattern 1 — where it's used]
+
+## Recommended Approach
+
+[The concrete recommendation for how to implement this feature, based on findings.]
+
+## Open Questions
+
+- [ ] [Question 1] ← owner: [human / architect agent]
+EOF
+  print_ok "memory/research/_TEMPLATE.research.md created"
+}
+
+write_orchestration_profiles() {
+  cat > "$RIG_DIR/orchestration/implementer.md" << 'EOF'
+# Implementer Agent
+
+> Level 3 — Two-agent orchestration.
+> Read this profile before every implementation task.
+
+---
+
+## Your Role
+
+You are the **implementer**. Your only job is to build what the task contract specifies — nothing more.
+
+---
+
+## Before You Write Any Code
+
+Read these files in order:
+
+1. `.rig/HARNESS.md` — project overview and active context
+2. `.rig/memory/progress.md` — current state
+3. The active spec: `.rig/feedforward/specs/[feature].spec.md`
+4. The current task: `.rig/feedforward/tasks/[feature]/task-[XX].md`
+5. All rules files: `.rig/feedforward/rules/`
+6. The skills listed in the task: `.rig/feedforward/skills/[skill].md`
+
+---
+
+## Rules
+
+**Build only what the contract specifies.**
+If something is not in the contract, do not build it. Scope is fixed.
+
+**Respect file ownership.**
+You may only create or modify files declared in the task's File Ownership section. If you need to touch something outside that list, stop and escalate.
+
+**Do not self-validate.**
+You are not the validator. Do not run sensors to check your own work. Do not declare yourself done based on your own judgment. The validator decides if you passed.
+
+**Sign the contract.**
+When you finish each deliverable, check the corresponding box in the contract. Every box must be checked before handoff.
+
+**Do not modify tests to pass.**
+If a test fails, fix the implementation. Changing a test to match wrong behavior is never acceptable.
+
+---
+
+## Handoff
+
+When all contract items are checked:
+
+1. Ensure all changed files are saved
+2. Write a brief summary of what you built (2-4 sentences)
+3. Pass the contract to the validator
+EOF
+
+  cat > "$RIG_DIR/orchestration/validator.md" << 'EOF'
+# Validator Agent
+
+> Level 3 — Two-agent orchestration.
+> Read this profile before every validation task.
+
+---
+
+## Your Role
+
+You are the **validator**. Your only job is to verify that the implementation satisfies the contract — nothing more.
+
+---
+
+## Before You Validate
+
+Read these files:
+
+1. The signed contract: `.rig/orchestration/contracts/[feature]-task-[XX].contract.md`
+2. The spec (for approved fixtures): `.rig/feedforward/specs/[feature].spec.md`
+3. The implementation (the files listed in contract File Ownership)
+4. Sensor results (if sensors are configured)
+
+---
+
+## Validation Process
+
+### Step 1 — Run computational sensors
+For each sensor in `feedback/sensors/`: execute the command, record PASS or FAIL.
+
+### Step 2 — Check each contract item
+For every item in "Implementer Commits To": verify using the method in "Validator Must Check". Mark PASS or FAIL — no partial credit.
+
+### Step 3 — Check approved fixtures
+Run the test that covers each approved fixture. Every fixture must produce the exact expected output.
+
+### Step 4 — Check file ownership
+Run `git diff --name-only`. Any file outside the declared ownership list is a violation.
+
+---
+
+## Rules
+
+**Check every item. No shortcuts.**
+Do not mark PASSED if any item is unchecked or failed.
+
+**No suggestions beyond contract scope.**
+You are not a code reviewer. Do not suggest improvements outside the contract items.
+
+**Be specific on failures.**
+Failures must include: file path, line number (when applicable), expected vs. actual.
+
+**You cannot be biased toward passing.**
+Your job is to find what's wrong, not to confirm it passed.
+
+---
+
+## Verdict
+
+- **PASSED**: All items verified, all sensors green, all fixtures pass. Update `memory/progress.md` to mark task complete.
+- **FAILED**: Return the contract to the implementer with a specific failure list.
+EOF
+
+  print_ok "orchestration/implementer.md and validator.md created"
+}
+
+write_review_template() {
+  cat > "$RIG_DIR/feedback/review/code-review.review.md" << 'EOF'
+# Review Agent — Code Review
+
+> Level 3 — Inferential sensor.
+> Runs after the validator confirms computational sensors pass.
+> Scope: only the files changed in this task.
+
+---
+
+## Your Role
+
+You are a **code reviewer**. Your job is to check that the implementation is semantically correct — not just syntactically valid.
+
+Computational sensors (lint, typecheck, tests) check structure. You check meaning.
+
+---
+
+## Scope
+
+Only review files in the task's File Ownership list. Do not comment on code outside this task's scope.
+
+---
+
+## What to Check
+
+### 1. Spec Compliance
+- Does the implementation satisfy every acceptance criterion in the spec?
+- Do the approved fixtures produce the exact expected outputs?
+
+### 2. Architecture Rules
+- Does the implementation follow `feedforward/rules/architecture.rules.md`?
+- Are module boundaries respected? Is layering correct?
+
+### 3. Standards Compliance
+- Naming conventions per `feedforward/rules/naming.rules.md`?
+- File structure per `feedforward/rules/structure.rules.md`?
+- API response format per `feedforward/rules/api.rules.md`?
+- Test structure per `feedforward/rules/testing.rules.md`?
+
+### 4. Edge Cases
+- Are obvious edge cases handled?
+- Are there unhandled error paths?
+
+---
+
+## Output Format
+
+```markdown
+## Review Result: PASS | FAIL
+
+### Spec Compliance
+[PASS / FAIL] — [details]
+
+### Architecture Rules
+[PASS / FAIL] — [details]
+
+### Standards Compliance
+[PASS / FAIL] — [details]
+
+### Edge Cases
+[PASS / notes]
+
+### Failures (if any)
+- File: `[path]`, Line: [N] — [expected vs actual]
+```
+
+Return only what's listed above. No refactoring suggestions. No style opinions beyond what the rules define.
+EOF
+  print_ok "feedback/review/code-review.review.md created"
+}
+
+write_audit_templates() {
+  cat > "$RIG_DIR/feedback/audit/dead-code.audit.md" << 'EOF'
+# Audit: Dead Code
+
+> Level 3 — Continuous sensor. Runs on schedule, outside the task change cycle.
+> Detects unused exports, unreachable code, and orphaned files.
+
+---
+
+## Command
+
+```bash
+# Node.js / TypeScript
+npx knip
+
+# Alternative
+npx ts-prune
+```
+
+## What It Detects
+
+- Exported functions/classes never imported elsewhere
+- Files never referenced
+- Variables declared but never used
+
+## Pass Condition
+
+Zero unused exports in `src/`. Exceptions documented below.
+
+## Known Exceptions
+
+- [export name] in [file] — reason: [why it's intentionally kept]
+
+## On Detection
+
+1. Confirm each item is genuinely unused (not a false positive)
+2. Remove unused code or document why it must stay
+3. Update Known Exceptions if keeping it is intentional
+EOF
+
+  cat > "$RIG_DIR/feedback/audit/dependency-health.audit.md" << 'EOF'
+# Audit: Dependency Health
+
+> Level 3 — Continuous sensor. Runs on schedule, outside the task change cycle.
+> Detects outdated dependencies, known vulnerabilities, and unused packages.
+
+---
+
+## Commands
+
+```bash
+# Vulnerabilities
+npm audit
+
+# Outdated packages
+npm outdated
+
+# Unused/missing dependencies
+npx depcheck
+```
+
+## Pass Condition
+
+- Zero critical or high severity vulnerabilities
+- No dependencies more than 2 major versions behind
+- No unused dependencies
+
+## On Detection
+
+1. Vulnerabilities: update immediately and test
+2. Outdated: create an upgrade task for the next sprint
+3. Unused/missing: clean up package.json
+EOF
+
+  cat > "$RIG_DIR/feedback/audit/drift-report.audit.md" << 'EOF'
+# Audit: Drift Report
+
+> Level 3 — Continuous sensor. Runs on schedule, outside the task change cycle.
+> Detects gradual architectural degradation invisible in per-task sensors.
+
+---
+
+## What This Checks
+
+### Architecture Drift
+- Module boundary violations that slipped through
+- New forbidden imports
+- Layer violations missed by per-task sensors
+
+### Standards Drift
+- New files not following naming conventions
+- New folders outside the defined structure
+- API responses not matching the envelope
+
+### Coverage Drift
+- Modules whose test coverage dropped below minimum
+- Files added without tests
+
+---
+
+## Commands
+
+```bash
+# Architecture drift (adjust config path as needed)
+npx depcruise src/ --config .dependency-cruiser.json
+
+# Coverage drift
+npm test -- --coverage
+```
+
+## Report Format
+
+Findings saved to: `feedback/audit/report-[YYYY-MM-DD].md`
+
+```markdown
+# Drift Report — [YYYY-MM-DD]
+
+## Architecture Drift
+[CLEAN / VIOLATIONS FOUND]
+- [violation] → `[file]`
+
+## Standards Drift
+[CLEAN / VIOLATIONS FOUND]
+
+## Coverage Drift
+[CLEAN / BELOW MINIMUM]
+- `[module]`: [X]% (minimum: [Y]%)
+
+## Trend
+[Better / Stable / Degrading] vs previous report
+```
+EOF
+
+  print_ok "feedback/audit/ templates created (3 files)"
+}
+
 # All files contain the same minimal instruction: read HARNESS.md first.
 # Skips any file that already exists (respects existing config).
 write_agent_entrypoints() {
@@ -1897,13 +2517,11 @@ cmd_init() {
   mkdir -p "$RIG_DIR/feedforward/tasks"
   mkdir -p "$RIG_DIR/feedforward/rules"
   mkdir -p "$RIG_DIR/feedforward/skills"
-  mkdir -p "$RIG_DIR/feedforward/agents"
   mkdir -p "$RIG_DIR/feedback/sensors"
   mkdir -p "$RIG_DIR/feedback/review"
   mkdir -p "$RIG_DIR/feedback/audit"
   mkdir -p "$RIG_DIR/memory/research"
   mkdir -p "$RIG_DIR/orchestration/contracts"
-  mkdir -p "$RIG_DIR/adapters"
   print_ok "Folder structure created"
 
   print_step "Writing core files..."
@@ -1917,8 +2535,14 @@ cmd_init() {
   write_topology_rules
   write_topology_skills
   patch_harness_skills
+  write_mcp_config
+  write_research_template
+  write_orchestration_profiles
+  write_review_template
+  write_audit_templates
   write_sensor_generic_template
   write_sensor_templates
+  write_adapters
 
   # Write .rig/.gitignore to keep context assembler outputs out of version control
   cat > "$RIG_DIR/.gitignore" << 'EOF'

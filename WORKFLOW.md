@@ -459,15 +459,17 @@ Installs the `rig-spec` command to `~/.local/bin/`. No runtime required. Works o
 
 | Command | Description |
 |---|---|
-| `rig-spec init` | Initialize harness for new project |
-| `rig-spec init --retrofit` | Initialize harness for existing project (rules marked [DRAFT]) |
+| `rig-spec init` | Initialize harness — auto-detects stack and applies matching template |
+| `rig-spec init --retrofit` | Initialize for existing project (rules as [DRAFT], no skills overwrite) |
+| `rig-spec init --template <name>` | Force a specific template: `node-api`, `python-api`, `fullstack-nextjs`, `generic` |
 | `rig-spec status` | Show progress across all active specs |
 | `rig-spec resume` | Print full context for the next agent session |
 | `rig-spec validate` | Run all sensors in `feedback/sensors/` |
+| `rig-spec validate <task-id>` | Run sensors and show the task contract checklist |
 | `rig-spec audit` | Run continuous drift sensors, save report |
 | `rig-spec run <task-id>` | Assemble and print full task context for the agent |
 | `rig-spec research <topic>` | Create a research file in `memory/research/` |
-| `rig-spec shape <feature>` | Create a spec from the template |
+| `rig-spec shape <feature>` | Ask 5 questions, pre-fill spec, assemble context for agent |
 | `rig-spec plan <spec-name>` | Create task structure from a spec |
 | `rig-spec version` | Show installed version |
 

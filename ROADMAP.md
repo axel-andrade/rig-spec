@@ -541,7 +541,7 @@ Explicit non-goals. If they appear in a PR, they will be rejected.
 | D6 | Explicit contracts per task | Implicit validation | Clear agreement between agents, no ambiguity about done |
 | D7 | Automatic validate after run | Manual opt-in | System decides when done, not the agent |
 | D8 | Three memory files + research/ | Database, structured JSON | No dependencies, human and agent readable, sessions are independent |
-| D9 | `npx rig-spec` CLI | Global install, binary | Zero friction, works in any project without global setup |
+| D9 | `curl \| bash` global installer + bash CLI | npx, Go binary, Python package | Zero dependencies — bash runs everywhere; one command installs globally |
 | D10 | Greenfield + retrofit support | Greenfield only | Existing projects are the primary real-world use case |
 | D11 | Harness levels (1, 2, 3) | All-or-nothing | Progressive adoption; start simple, add complexity when needed |
 | D12 | Sensor discovery on retrofit | Manual sensor config | Reduces setup friction; starts from what already exists |
