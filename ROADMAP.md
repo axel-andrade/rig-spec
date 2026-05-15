@@ -36,7 +36,7 @@ Documented failure → Design solution → Build → Validate with real use
 
 ---
 
-## Phase 0 — Foundation (Complete)
+## Phase 0 — Foundation ✅
 
 **Goal:** Full design documented and understood before writing any code.
 
@@ -50,30 +50,61 @@ Documented failure → Design solution → Build → Validate with real use
 
 ---
 
-## Phase 1 — Core Structure (Level 1 Harness)
+## Phase 1 — Core Structure (Level 1 Harness) ✅
 
 **Goal:** A usable harness that works in any project today, with zero tooling required.
 
 **Solves:** patterns 1, 2, 3, 10, 12
 
-### 1.1 — Folder Template
+### 1.1 — Folder Template ✅
 
 The complete `.rig/` folder structure as a copyable template.
 
 ```
-.rig/
-├── HARNESS.md.template
+templates/.rig/
+├── HARNESS.md
 ├── feedforward/
 │   ├── specs/
 │   │   └── _TEMPLATE.spec.md
-│   └── tasks/
-│       └── _TEMPLATE.task.md
-└── memory/
-    ├── progress.md.template
-    └── bootstrap.md.template
+│   ├── tasks/
+│   │   └── _TEMPLATE.task.md
+│   ├── rules/
+│   │   ├── architecture.rules.md
+│   │   ├── naming.rules.md
+│   │   ├── structure.rules.md
+│   │   ├── component.rules.md
+│   │   ├── api.rules.md
+│   │   └── testing.rules.md
+│   ├── skills/
+│   │   └── _TEMPLATE.skill.md
+│   └── mcp.config.md
+├── feedback/
+│   ├── sensors/
+│   │   └── _TEMPLATE.sensor.md
+│   ├── review/
+│   │   └── code-review.review.md
+│   └── audit/
+│       ├── dead-code.audit.md
+│       ├── dependency-health.audit.md
+│       └── drift-report.audit.md
+├── memory/
+│   ├── progress.md
+│   ├── bootstrap.md
+│   ├── decisions.md
+│   └── research/
+│       └── _TEMPLATE.research.md
+├── orchestration/
+│   ├── contracts/
+│   │   └── _TEMPLATE.contract.md
+│   ├── implementer.md
+│   └── validator.md
+└── adapters/
+    ├── claude.md
+    ├── gemini.md
+    └── antigravity.md
 ```
 
-### 1.2 — `HARNESS.md` Template
+### 1.2 — `HARNESS.md` Template ✅
 
 The entry point file. Every agent reads this first.
 
@@ -85,16 +116,16 @@ Required sections:
 - Pointers to specs, tasks, progress, bootstrap
 - Available skills and MCP servers (empty until Phase 2)
 
-### 1.3 — Rules Templates (Standards System)
+### 1.3 — Rules Templates (Standards System) ✅
 
 ```
-.rig/feedforward/rules/
-├── architecture.rules.md.template
-├── naming.rules.md.template
-├── structure.rules.md.template
-├── component.rules.md.template   ← frontend only
-├── api.rules.md.template
-└── testing.rules.md.template
+templates/.rig/feedforward/rules/
+├── architecture.rules.md
+├── naming.rules.md
+├── structure.rules.md
+├── component.rules.md   ← frontend only
+├── api.rules.md
+└── testing.rules.md
 ```
 
 Each template includes an explanation of what it covers, common examples with blanks to fill in, and instructions for the agent on how to apply the rules.
@@ -105,10 +136,10 @@ During `init`:
 - New projects: filled from architecture pattern choice (clean / mvc / ddd)
 - Existing projects: left blank, to be populated by `rig-spec discover` (Phase 4 CLI)
 
-### 1.4 — Spec Template
+### 1.4 — Spec Template ✅
 
 ```
-.rig/feedforward/specs/_TEMPLATE.spec.md
+templates/.rig/feedforward/specs/_TEMPLATE.spec.md
 ```
 
 Required sections:
@@ -119,10 +150,10 @@ Required sections:
 - Acceptance Criteria
 - Approved Fixtures (behavioural harness — humans define expected outputs)
 
-### 1.4 — Task Template
+### 1.4 — Task Template ✅
 
 ```
-.rig/feedforward/tasks/_TEMPLATE.task.md
+templates/.rig/feedforward/tasks/_TEMPLATE.task.md
 ```
 
 Required sections:
@@ -136,10 +167,10 @@ Required sections:
 - Skills to Load
 - Contract (Definition of Done — checklist)
 
-### 1.5 — Contract Template
+### 1.5 — Contract Template ✅
 
 ```
-.rig/orchestration/contracts/_TEMPLATE.contract.md
+templates/.rig/orchestration/contracts/_TEMPLATE.contract.md
 ```
 
 Standard agreement between implementer and validator:
@@ -147,30 +178,16 @@ Standard agreement between implementer and validator:
 - Validator must check (verification method per item)
 - File ownership declaration
 
-### 1.6 — Progress Template
+### 1.6 — Progress Template ✅
 
 ```
-.rig/memory/progress.md
+templates/.rig/memory/progress.md
 ```
 
-Format:
-```markdown
-# Progress
-
-## [Feature Name]
-### Status: in-progress | complete | blocked
-- [x] task-01: [what was done] ([date])
-- [ ] task-02: ← NEXT
-- [ ] task-03
-
-## Last Session
-[What happened, what was left, any blockers]
-```
-
-### 1.7 — Bootstrap Template
+### 1.7 — Bootstrap Template ✅
 
 ```
-.rig/memory/bootstrap.md
+templates/.rig/memory/bootstrap.md
 ```
 
 Ordered reading list for context reconstruction:
@@ -370,64 +387,69 @@ Continuous sensors that run on schedule, outside the change lifecycle. Report he
 
 ---
 
-## Phase 4 — CLI Tool
+## Phase 4 — CLI (bash) ✅
 
-**Goal:** Automate the workflow so the harness is one command away.
+**Goal:** Um único script bash que qualquer pessoa instala com `curl | bash` e começa a usar imediatamente em qualquer projeto.
 
-**Why after Phase 3:** The CLI should automate a workflow that already works manually. Building the CLI before the workflow is validated is premature.
+**Why bash:** rig-spec é agnostic a linguagem, modelo e stack. Exigir um runtime (Node.js, Python, Go) contradiz esse princípio — um dev Python não deveria precisar instalar Node.js para usar uma ferramenta agnostic. Bash roda em qualquer Unix (Mac, Linux) sem dependências.
 
-### 4.1 — Package Setup
+### 4.1 — Dois arquivos, dois papéis
+
 ```
 rig-spec/
-├── package.json          ← name: "rig-spec", bin: "rig-spec"
-├── src/
-│   ├── cli.ts            ← entry point
-│   ├── commands/
-│   │   ├── init.ts
-│   │   ├── research.ts
-│   │   ├── shape.ts
-│   │   ├── plan.ts
-│   │   ├── run.ts
-│   │   ├── validate.ts
-│   │   ├── resume.ts
-│   │   ├── status.ts
-│   │   └── audit.ts
-│   └── core/
-│       ├── context-assembler.ts   ← assembles agent context for run
-│       ├── sensor-runner.ts       ← executes sensor commands
-│       ├── progress-writer.ts     ← updates memory/progress.md
-│       └── project-scanner.ts     ← retrofit: discovers existing tools
+├── install.sh      ← instalador global: baixa e instala o comando rig-spec no PATH
+├── rig-spec.sh     ← o CLI: todos os subcomandos, templates embutidos
 └── templates/
-    └── .rig/             ← the template folder (from Phase 1-3)
+    └── .rig/       ← templates estáticos (copiável manualmente — Phase 1)
 ```
 
-### 4.2 — `rig-spec discover`
+**Fluxo de instalação:**
+```bash
+# Uma linha — instala o comando rig-spec globalmente
+curl -fsSL https://raw.githubusercontent.com/axel-andrade/rig-spec/main/install.sh | bash
 
-The standards discovery command. Analyzes an existing codebase and generates draft rules files.
+# Em qualquer projeto, a partir daí:
+rig-spec init
+rig-spec status
+rig-spec validate
+```
 
-**What it does:**
-1. Scans folder structure, file naming patterns, import graphs, class/component shapes
-2. Identifies recurring patterns (naming conventions, module organization, component structure)
-3. Generates draft `rules/` files — every item marked `[DRAFT — please review]`
-4. Prints a summary: "Found X patterns in Y files. Review `.rig/feedforward/rules/` before proceeding."
+### 4.2 — Subcomandos
 
-**Human review is mandatory before rules become active.** Discovered patterns may be accidents or legacy debt — humans decide what's intentional. After review, `rig-spec validate-rules` confirms sensors are configured for each approved rule.
+| Comando | O que faz |
+|---|---|
+| `rig-spec init` | Cria `.rig/` no projeto atual, detecta stack e sensores |
+| `rig-spec init --retrofit` | Modo retrofit: gera rules em branco marcadas [DRAFT] |
+| `rig-spec status` | Lê `memory/progress.md` e exibe estado atual |
+| `rig-spec resume` | Imprime o contexto completo para a próxima sessão do agente |
+| `rig-spec validate [task]` | Lê `feedback/sensors/`, extrai e executa cada comando |
+| `rig-spec audit` | Executa sensores de `feedback/audit/`, salva relatório |
+| `rig-spec run <task-id>` | Monta contexto completo do task e imprime para o agente |
+| `rig-spec research <topic>` | Cria arquivo de pesquisa em `memory/research/` |
+| `rig-spec shape <feature>` | Cria spec a partir do template com campos a preencher |
+| `rig-spec plan <spec>` | Cria estrutura de tasks a partir de uma spec |
+| `rig-spec version` | Exibe versão instalada |
 
-### 4.3 — Command Implementations
+### 4.3 — Princípio dos comandos AI-assistidos
 
-Each command:
-1. Reads from `.rig/` (current state)
-2. Calls the appropriate AI tool (via configured adapter or default)
-3. Writes output back to `.rig/`
-4. Updates `progress.md`
+`run`, `research`, `shape` e `plan` são **context assemblers** — eles não chamam nenhuma API de AI.
+
+O que eles fazem:
+1. Leem os arquivos `.rig/` relevantes
+2. Montam o contexto em um único bloco de markdown
+3. Imprimem na tela ou salvam em `.rig/context-[task].md`
+4. Instruem o usuário: "Cole este contexto no seu agente de IA"
+
+Isso mantém o framework 100% agnostic — o agente pode ser Claude, Gemini, GPT ou qualquer outro.
 
 ### Technical Stack
 ```
-Runtime:     Node.js (npx-installable, no global install required)
-Language:    TypeScript
-File format: Markdown, YAML (no proprietary formats)
-AI calls:    Delegated to configured tool (model-agnostic)
-Backend:     None — everything is local files
+Runtime:     bash (≥ 3.2 — compatível com macOS e Linux)
+Language:    bash
+File format: Markdown (no proprietary formats)
+AI calls:    Nenhuma — delegado ao agente do usuário
+Backend:     Nenhum — tudo em arquivos locais
+Windows:     WSL ou Git Bash
 ```
 
 ---
@@ -495,3 +517,5 @@ Explicit non-goals. If they appear in a PR, they will be rejected.
 | D19 | Standards in `feedforward/rules/` as both context AND sensor input | Separate standards docs, runtime-only rules | Single source of truth: same file guides agent AND drives compliance sensors |
 | D20 | `discover` generates drafts requiring human approval | Auto-apply discovered patterns | Discovered patterns may be accidents; only humans decide what's intentional |
 | D21 | Computational + inferential standards sensors | Computational only | Linters catch structure; AI reviewer catches semantic violations linters cannot |
+| D22 | CLI em bash puro | Node.js/TypeScript, Go, Python | rig-spec é agnostic a linguagem — exigir um runtime contradiz o princípio. Bash roda sem dependências em qualquer Unix |
+| D23 | CLI = context assembler para comandos AI-assistidos | CLI chama API diretamente | Manter 100% agnostic ao modelo; o agente é do usuário, não do framework |

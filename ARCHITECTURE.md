@@ -461,10 +461,10 @@ Continuous audit sensors run on schedule
 ## Greenfield vs Retrofit
 
 ### Greenfield (new project)
-Run `npx rig-spec init` and choose your starting level. The harness is set up before any code is written. Maximum harnessability from day one.
+Run `rig-spec init` and choose your starting level. The harness is set up before any code is written. Maximum harnessability from day one.
 
 ### Retrofit (existing project)
-Run `npx rig-spec init --retrofit`. The CLI:
+Run `rig-spec init --retrofit`. The CLI:
 1. Scans the project for existing sensors (linters, test scripts, CI config)
 2. Discovers the tech stack (package.json, requirements.txt, go.mod, etc.)
 3. Generates a contextual `HARNESS.md` based on what it finds

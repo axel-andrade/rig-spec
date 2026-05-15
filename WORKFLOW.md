@@ -26,10 +26,10 @@ Each step has a specific purpose, a clear input, and a defined output. Nothing m
 **Command:**
 ```bash
 # New project
-npx rig-spec init
+rig-spec init
 
 # Existing project
-npx rig-spec init --retrofit
+rig-spec init --retrofit
 ```
 
 **What happens:**
@@ -68,7 +68,7 @@ npx rig-spec init --retrofit
 
 **Command:**
 ```bash
-npx rig-spec research "how notifications should work in this codebase"
+rig-spec research "how notifications should work in this codebase"
 ```
 
 **What happens:**
@@ -100,10 +100,10 @@ Implement → read spec + tasks + research findings (clean context)
 
 **Command:**
 ```bash
-npx rig-spec shape "notification system"
+rig-spec shape "notification system"
 
 # Or provide context upfront
-npx rig-spec shape "notification system" --from prd.md
+rig-spec shape "notification system" --from prd.md
 ```
 
 **What happens:**
@@ -159,7 +159,7 @@ Deliver real-time and async notifications across email and in-app channels.
 
 **Command:**
 ```bash
-npx rig-spec plan notification-system
+rig-spec plan notification-system
 ```
 
 **What happens:**
@@ -230,7 +230,7 @@ Create the `notifications` table with all required fields.
 
 **Command:**
 ```bash
-npx rig-spec run task-01
+rig-spec run task-01
 ```
 
 **What happens:**
@@ -256,7 +256,7 @@ npx rig-spec run task-01
 
 **Runs automatically after every `run`.** Can also be triggered manually:
 ```bash
-npx rig-spec validate task-01
+rig-spec validate task-01
 ```
 
 **What happens:**
@@ -322,7 +322,7 @@ run → validate FAILED
 
 **Command:**
 ```bash
-npx rig-spec audit
+rig-spec audit
 ```
 
 **What happens:**
@@ -344,7 +344,7 @@ npx rig-spec audit
 When you return to a project after any break, run:
 
 ```bash
-npx rig-spec resume
+rig-spec resume
 ```
 
 This triggers the bootstrap sequence:
@@ -377,45 +377,55 @@ This triggers the bootstrap sequence:
 
 ```bash
 # Set up harness on existing project
-npx rig-spec init --retrofit
+rig-spec init --retrofit
 # → .rig/ created, sensors discovered, HARNESS.md generated
 
 # Research before specifying
-npx rig-spec research "notification patterns in this codebase"
+rig-spec research "notification patterns in this codebase"
 # → .rig/memory/research/notifications.md created
 
 # Spec the notification system
-npx rig-spec shape "notification system"
+rig-spec shape "notification system"
 # → .rig/feedforward/specs/notification-system.spec.md created
 
 # Break into tasks
-npx rig-spec plan notification-system
+rig-spec plan notification-system
 # → .rig/feedforward/tasks/notification-system/ with 5 tasks
 
 # Run task 01
-npx rig-spec run task-01
+rig-spec run task-01
 # → context assembled → implementer builds schema
 # → sensors run → validator checks contract
 # → PASSED → progress.md updated
 
 # New session, no amnesia
-npx rig-spec resume
+rig-spec resume
 # → context rebuilt → ready for task-02
 
 # Run task 02
-npx rig-spec run task-02
+rig-spec run task-02
 # → FAILED: missing error handling
 # → implementer receives specific failure
 # → retry → PASSED
 
 # Check overall status
-npx rig-spec status
+rig-spec status
 # → notification-system: 2/5 tasks complete
 
 # Run weekly audit
-npx rig-spec audit
+rig-spec audit
 # → .rig/feedback/audit/report-2026-05-15.md generated
 ```
+
+---
+
+## Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/axel-andrade/rig-spec/main/install.sh | bash
+```
+
+Installs the `rig-spec` command to `~/.local/bin/`. No runtime required. Works on Mac and Linux.
 
 ---
 
@@ -424,14 +434,15 @@ npx rig-spec audit
 | Command | Description |
 |---|---|
 | `rig-spec init` | Initialize harness for new project |
-| `rig-spec init --retrofit` | Initialize harness for existing project |
-| `rig-spec research [topic]` | Open research session, save findings to memory/research/ |
-| `rig-spec shape [feature]` | Create a spec for a feature |
-| `rig-spec shape [feature] --from [file]` | Create spec from existing PRD or document |
-| `rig-spec plan [spec-name]` | Break a spec into tasks with file ownership |
-| `rig-spec run [task-id]` | Execute a task (triggers validate automatically) |
-| `rig-spec validate [task-id]` | Run validation manually |
-| `rig-spec resume` | Rebuild context and show current state |
+| `rig-spec init --retrofit` | Initialize harness for existing project (rules marked [DRAFT]) |
 | `rig-spec status` | Show progress across all active specs |
-| `rig-spec audit` | Run continuous drift sensors |
-| `rig-spec level [1\|2\|3]` | Upgrade to a higher harness level |
+| `rig-spec resume` | Print full context for the next agent session |
+| `rig-spec validate` | Run all sensors in `feedback/sensors/` |
+| `rig-spec audit` | Run continuous drift sensors, save report |
+| `rig-spec run <task-id>` | Assemble and print full task context for the agent |
+| `rig-spec research <topic>` | Create a research file in `memory/research/` |
+| `rig-spec shape <feature>` | Create a spec from the template |
+| `rig-spec plan <spec-name>` | Create task structure from a spec |
+| `rig-spec version` | Show installed version |
+
+> `run`, `research`, `shape`, and `plan` are **context assemblers** — they prepare and print the context so you can paste it into your AI agent of choice. No API calls are made.
