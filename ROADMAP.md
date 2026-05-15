@@ -213,7 +213,7 @@ cp -r rig-spec/templates/.rig your-project/
 
 ---
 
-## Phase 2 — Memory + Skills + MCP (Level 2 Harness)
+## Phase 2 — Memory + Skills + MCP (Level 2 Harness) ✅
 
 **Goal:** Full context persistence, architectural memory, specialized knowledge injection, and MCP integration.
 
@@ -298,7 +298,7 @@ Optional tool-specific instructions that supplement `HARNESS.md`.
 
 ---
 
-## Phase 3 — Sensors + Two Agents (Level 3 Harness)
+## Phase 3 — Sensors + Two Agents (Level 3 Harness) ✅
 
 **Goal:** Automated validation, full implementer/validator separation, spec compliance, and continuous monitoring.
 
@@ -454,26 +454,63 @@ Windows:     WSL ou Git Bash
 
 ---
 
-## Phase 5 — Harness Templates
+## Phase 5 — Harness Templates ✅
 
 **Goal:** Pre-built harnesses for the most common project topologies.
 
 **Why last:** Templates are only useful after the harness design is proven in real use.
 
-### Planned Topologies
+### Topologies
 
-| Template | Stack | What it includes |
-|---|---|---|
-| `node-api` | Node.js + TypeScript + REST | ESLint, TypeScript, Jest sensors + API rules + NestJS/Express skills |
-| `fullstack-nextjs` | Next.js + TypeScript + PostgreSQL | Frontend + backend rules, component patterns, Drizzle skill |
-| `python-api` | Python + FastAPI | Ruff, Pytest sensors + API rules + SQLAlchemy skill |
-| `generic` | Language-agnostic | Only markdown files, no language-specific sensors |
+| Template | Stack | Rules pre-filled | Skills included | Sensors |
+|---|---|---|---|---|
+| `node-api` | Node.js / Express / NestJS + TypeScript | architecture, naming, api, testing | typescript, nodejs | lint (ESLint), typecheck (tsc), test (npm test) |
+| `fullstack-nextjs` | Next.js + TypeScript + React | architecture, naming, component, api, testing | nextjs, react | lint (ESLint), typecheck (tsc), test (Jest) |
+| `python-api` | Python + FastAPI | architecture, naming, api, testing | fastapi, python | lint (Ruff), typecheck (mypy), test (pytest) |
+| `generic` | Language-agnostic | blank stubs only | skill template only | none |
 
-Each template is a `.rig/` folder pre-configured for that topology:
-- Pre-written rules for the stack
-- Pre-configured sensor commands
-- Populated skills for primary technologies
-- Example spec and task showing patterns
+### How templates are applied
+
+**Automatic** — `rig-spec init` detects the stack and applies the matching template:
+```bash
+# project with package.json + express → node-api rules + skills applied automatically
+rig-spec init
+
+# project with pyproject.toml → python-api rules + skills applied automatically
+rig-spec init
+```
+
+**Manual override** — force a specific template regardless of detection:
+```bash
+rig-spec init --template node-api
+rig-spec init --template python-api
+rig-spec init --template fullstack-nextjs
+rig-spec init --template generic
+```
+
+**Manual install** (no CLI) — copy the topology folder directly:
+```bash
+cp -r rig-spec/templates/node-api/.rig your-project/
+```
+
+### Static template files
+
+```
+templates/
+├── .rig/                    ← generic base (all stack-agnostic files)
+├── node-api/.rig/
+│   ├── feedforward/rules/   ← architecture, naming, api, testing (Node.js)
+│   ├── feedforward/skills/  ← typescript.skill.md, nodejs.skill.md
+│   └── feedback/sensors/    ← lint, typecheck, test
+├── python-api/.rig/
+│   ├── feedforward/rules/   ← architecture, naming, api, testing (Python)
+│   ├── feedforward/skills/  ← fastapi.skill.md, python.skill.md
+│   └── feedback/sensors/    ← lint (ruff), typecheck (mypy), test (pytest)
+└── fullstack-nextjs/.rig/
+    ├── feedforward/rules/   ← architecture, naming, component, api, testing (Next.js)
+    ├── feedforward/skills/  ← nextjs.skill.md, react.skill.md
+    └── feedback/sensors/    ← lint, typecheck, test
+```
 
 ---
 

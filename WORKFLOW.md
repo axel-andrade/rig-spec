@@ -234,46 +234,72 @@ rig-spec run task-01
 ```
 
 **What happens:**
-1. The orchestrator assembles the full context:
+1. The CLI assembles the full context into `.rig/context-[task-id].md`:
    - `.rig/HARNESS.md` (project overview)
-   - `.rig/memory/bootstrap.md` (current state)
-   - `.rig/feedforward/specs/notification-system.spec.md` (the spec)
-   - `.rig/feedforward/tasks/notification-system/task-01.md` (the task)
+   - `.rig/memory/progress.md` (current state)
+   - `.rig/feedforward/specs/[spec].spec.md` (the spec)
+   - `.rig/feedforward/tasks/[feature]/[task].md` (the task)
    - `.rig/feedforward/rules/` (coding conventions)
    - Relevant skills listed in the task
-   - Research findings from `memory/research/` if referenced
-2. The **implementer agent** receives this assembled context
-3. The implementer writes the code and signs the contract
-4. `validate` runs automatically
+2. You paste the assembled context into your AI agent of choice
+3. The **implementer agent** reads the context, writes the code, signs the contract
+4. You run `rig-spec validate` to check the result
+
+> `run` is a context assembler — it prepares and prints the context. No AI call is made. The agent is yours.
 
 **Why assembling context matters:** Without full context, the agent improvises. With assembled context, it has everything it needs in one clean window — fewer tokens, better results, no guessing.
 
 ---
 
-### Step 6 — `validate` (automatic after every `run`)
+### Step 6 — `validate`
 
 **Purpose:** Verify the implementation against the contract and sensors.
 
-**Runs automatically after every `run`.** Can also be triggered manually:
+**Run after every `run`, once the agent has finished:**
 ```bash
 rig-spec validate task-01
 ```
 
 **What happens:**
 
+`rig-spec validate` reads every `*.sensor.md` file in `.rig/feedback/sensors/`, extracts the `## Command` block, runs it, and reports pass/fail.
+
+#### Which sensors are active
+
+**Auto-discovered on `rig-spec init`** (found by scanning the project):
+- ESLint → `lint.sensor.md` (if `.eslintrc.*` or `eslint.config.*` found)
+- TypeScript → `typecheck.sensor.md` (if `tsconfig.json` found)
+- npm test → `test.sensor.md` (if `"test"` script in `package.json` found)
+- Ruff → `lint.sensor.md` (if `ruff.toml` or `[tool.ruff]` in `pyproject.toml`)
+- mypy → `typecheck.sensor.md` (if `mypy.ini` or `[tool.mypy]` in `pyproject.toml`)
+- pytest → `test.sensor.md` (if `pytest.ini` or `[tool.pytest]` in `pyproject.toml`)
+
+**Require manual configuration** (templates provided, commands need adjusting):
+- `arch.sensor.md` — dependency boundary checks (dependency-cruiser, custom script)
+- `naming.sensor.md` — naming convention checks (ESLint custom rules)
+- `structure.sensor.md` — folder layout checks (custom script)
+- `spec-compliance.sensor.md` — inferential: AI verifies impl matches spec
+- `standards-compliance.sensor.md` — inferential: AI verifies impl matches rules/
+
+To add a sensor manually: copy `_TEMPLATE.sensor.md`, fill in the `## Command` block, and `rig-spec validate` will pick it up automatically.
+
 #### Phase A — Computational Sensors (fast, deterministic)
 ```bash
-→ lint.sensor.md         → npx eslint src/
-→ typecheck.sensor.md    → npx tsc --noEmit
-→ test.sensor.md         → npm test
-→ arch.sensor.md         → npx depcruise src/
+→ lint.sensor.md         → runs your linter (ESLint, Ruff, etc.)
+→ typecheck.sensor.md    → runs your type checker (tsc, mypy)
+→ test.sensor.md         → runs your test suite (npm test, pytest)
+→ arch.sensor.md         → checks module boundaries (manual config required)
 ```
 
-#### Phase B — Spec Compliance Sensor (inferential)
+#### Phase B — Inferential Sensors (AI-assisted, semantic)
 ```
-→ spec-compliance.sensor.md
+→ spec-compliance.sensor.md       (manual config required)
   Verifies implementation against spec acceptance criteria
   Checks approved fixtures produce expected outputs
+
+→ standards-compliance.sensor.md  (manual config required)
+  AI reviewer reads rules/ and checks semantic compliance
+  Catches violations linters cannot: wrong layer, wrong abstraction
 ```
 
 #### Phase C — Contract Validation (the validator agent)

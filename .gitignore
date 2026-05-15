@@ -74,6 +74,7 @@ temp/
 # Project-specific
 references/
 .claude/
+ROADMAP.md
 
 # ─────────────────────────────────────────────
 # NOTE: .rig/ is intentionally NOT ignored.

@@ -21,6 +21,23 @@ It gives your AI agents the structure, context, memory, and validation loops the
 
 ---
 
+## Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/axel-andrade/rig-spec/main/install.sh | bash
+```
+
+Installs the `rig-spec` command to `~/.local/bin/`. No runtime required. Works on Mac and Linux (Windows: WSL or Git Bash).
+
+Then in any project:
+
+```bash
+cd your-project
+rig-spec init
+```
+
+---
+
 ## How It Works
 
 `rig-spec` adds a `.rig/` folder to your project. This folder contains everything the agent needs:
@@ -53,6 +70,18 @@ It gives your AI agents the structure, context, memory, and validation loops the
 
 ---
 
+## Repository Structure
+
+```
+rig-spec/
+├── install.sh      ← installs the rig-spec command to PATH (~/.local/bin)
+├── rig-spec.sh     ← the full CLI: all subcommands + templates embedded
+├── templates/.rig/ ← static templates (alternative: copy manually)
+└── *.md            ← design documentation
+```
+
+---
+
 ## The Development Flow
 
 ```
@@ -60,15 +89,130 @@ init → research → shape → plan → run → validate → audit
 ```
 
 ```bash
-npx rig-spec init --retrofit        # set up on existing project
-npx rig-spec discover               # extract project standards from codebase
-npx rig-spec research "topic"       # investigate before specifying
-npx rig-spec shape "feature name"   # write the spec
-npx rig-spec plan feature-name      # break into tasks
-npx rig-spec run task-01            # implement + validate automatically
-npx rig-spec resume                 # pick up where you left off
-npx rig-spec audit                  # check for accumulated drift
+rig-spec init --retrofit        # set up on existing project
+rig-spec research "topic"       # investigate before specifying
+rig-spec shape "feature name"   # write the spec
+rig-spec plan feature-name      # break into tasks
+rig-spec run task-01            # assemble context for your AI agent
+rig-spec validate               # run all sensors
+rig-spec resume                 # pick up where you left off
+rig-spec audit                  # check for accumulated drift
 ```
+
+> `run`, `research`, `shape`, and `plan` are **context assemblers** — they prepare and print the context so you can paste it into your AI agent of choice. No API calls are made.
+
+---
+
+## Quick Start (5 minutes)
+
+**Step 1 — Install**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/axel-andrade/rig-spec/main/install.sh | bash
+```
+
+Reload your shell, then:
+
+```bash
+cd your-project
+rig-spec init
+```
+
+**Step 2 — Fill in `HARNESS.md`**
+
+Open `.rig/HARNESS.md` and add:
+- What your project is (1 paragraph)
+- Your tech stack
+- Harness level: start with `1`
+
+**Step 3 — Create your first spec**
+
+```bash
+cp .rig/feedforward/specs/_TEMPLATE.spec.md \
+   .rig/feedforward/specs/my-first-feature.spec.md
+```
+
+Fill in: Problem, Goal, Out of Scope, User Stories, Acceptance Criteria, Approved Fixtures.
+
+**Step 4 — Create tasks**
+
+```bash
+rig-spec plan my-first-feature
+```
+
+This assembles the context and prints instructions for your agent to create the task breakdown.
+
+**Step 5 — Start working**
+
+```bash
+rig-spec run task-01
+```
+
+Opens the assembled context. Paste it into Claude, Gemini, GPT, or any other agent.
+
+---
+
+## How to Work
+
+Every feature goes through the same sequence — what changes is *who* runs each step.
+
+```
+shape → plan → run → validate
+```
+
+### Path 1 — Single Agent, Separate Sessions
+
+You orchestrate. Each command assembles a clean context that you paste into any AI agent.
+
+```bash
+rig-spec shape "feature name"
+# → asks 5 questions, pre-fills spec, outputs context
+# → paste into your agent → agent completes User Stories + AC
+
+rig-spec plan feature-name
+# → outputs context for the agent to break the spec into tasks
+
+rig-spec run task-01
+# → outputs full context (spec + task + rules + skills)
+# → paste into your agent → agent implements
+
+rig-spec validate
+# → runs all sensors, reports pass/fail per item
+```
+
+Each step runs in its own context window. No pollution between research, planning, and implementation.
+
+### Path 2 — Two Agents (Implementer + Validator)
+
+Same flow, but validation is handled by a separate agent with a different mission.
+
+```
+rig-spec run task-01
+  → Implementer: reads spec + task + rules, writes code, signs the contract
+  → Validator:   reads signed contract + code + sensor results
+                 checks every item, returns pass or specific failure list
+  → If failed:   implementer receives exact failures → fixes → retry
+```
+
+The implementer and validator have separate profiles in `.rig/orchestration/`:
+
+```
+.rig/orchestration/
+├── implementer.md   ← build only what the contract specifies, sign each item
+└── validator.md     ← check every item, never mark pass if anything is unchecked
+```
+
+**Why two agents:** an agent validating its own work will always find reasons it passed. The validator has one job — find what's wrong. Separate missions eliminate self-evaluation bias.
+
+### Which path to use
+
+| Situation | Path |
+|---|---|
+| Getting started, small team | Path 1 — single agent, you review |
+| High-stakes features, want objective validation | Path 2 — two agents |
+| Retrofitting an existing project | Path 1 first, add Path 2 when sensors are in place |
+
+Both paths use the same commands and the same `.rig/` structure. You can mix them per feature.
 
 ---
 
@@ -87,85 +231,66 @@ Every task has a contract — a checklist of what "done" means, agreed before an
 Start with just specs and tasks (Level 1). Add memory and skills (Level 2). Add sensors and two-agent orchestration (Level 3). Use only what you need.
 
 ### Model-Agnostic
-Works with Claude Code, Gemini, Antigravity, Cursor, or any other AI tool. No lock-in. Everything is Markdown and YAML.
+Works with Claude Code, Gemini, Antigravity, Cursor, or any other AI tool. No lock-in. Everything is Markdown. No API calls in the CLI.
 
 ### Solves 13 Agent Failure Patterns
 From "One Shot Hero" to "Continuous Drift" — every documented way AI agents fail in production is addressed by the framework. See [VISION.md](VISION.md) for the full list.
 
 ---
 
-## Installation
+## Stack Templates
 
-### Option 1 — Shell Script (Recommended for existing projects)
+`rig-spec init` auto-detects your stack and applies a pre-built template with rules and skills already filled in.
+
+| Template | Detected from | Rules | Skills |
+|---|---|---|---|
+| `node-api` | `package.json` (Express / NestJS / Node) | layered arch, TS naming, REST API, Jest testing | TypeScript, Node.js |
+| `fullstack-nextjs` | `package.json` + `"next"` dependency | App Router arch, React naming, component rules, API routes | Next.js, React |
+| `python-api` | `pyproject.toml` / `requirements.txt` | layered arch, snake_case naming, FastAPI, pytest | FastAPI, Python |
+| `generic` | (fallback) | blank stubs | skill template |
+
+Override auto-detection when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-username/rig-spec/main/install.sh | bash
+rig-spec init --template node-api
+rig-spec init --template python-api
+rig-spec init --template fullstack-nextjs
+rig-spec init --template generic
 ```
 
-This copies the `.rig/` template into your current project directory.
-
-### Option 2 — npx (CLI — coming in Phase 4)
+Or copy static templates without the CLI:
 
 ```bash
-# New project
-npx rig-spec init
-
-# Existing project (scans for existing tools automatically)
-npx rig-spec init --retrofit
-```
-
-### Option 3 — Manual
-
-1. Clone this repository
-2. Copy the `templates/.rig/` folder into your project root
-3. Fill in `.rig/HARNESS.md` with your project details
-4. Start with your first spec
-
-```bash
-git clone https://github.com/your-username/rig-spec.git
-cp -r rig-spec/templates/.rig your-project/
+cp -r rig-spec/templates/node-api/.rig your-project/
 ```
 
 ---
 
-## Quick Start (5 minutes)
+## Sensors
 
-**Step 1 — Install**
+`rig-spec validate` runs every `*.sensor.md` file in `.rig/feedback/sensors/` and reports pass/fail.
 
-```bash
-cd your-project
-curl -fsSL https://raw.githubusercontent.com/your-username/rig-spec/main/install.sh | bash
-```
+**Auto-discovered on `init`** (found by scanning the project):
 
-**Step 2 — Fill in `HARNESS.md`**
+| Tool found | Sensor created |
+|---|---|
+| `.eslintrc.*` / `eslint.config.*` | `lint.sensor.md` |
+| `tsconfig.json` | `typecheck.sensor.md` |
+| `"test"` in `package.json` | `test.sensor.md` |
+| `ruff.toml` / `[tool.ruff]` | `lint.sensor.md` |
+| `mypy.ini` / `[tool.mypy]` | `typecheck.sensor.md` |
+| `pytest.ini` / `[tool.pytest]` | `test.sensor.md` |
 
-Open `.rig/HARNESS.md` and add:
-- What your project is (1 paragraph)
-- Your tech stack
-- Harness level: start with `1`
+**Require manual config** (templates provided in `feedback/sensors/`):
 
-**Step 3 — Create your first spec**
+| Sensor | What it checks |
+|---|---|
+| `arch.sensor.md` | Module boundary violations (dependency-cruiser or custom script) |
+| `naming.sensor.md` | Naming convention compliance (ESLint custom rules) |
+| `spec-compliance.sensor.md` | AI verifies implementation matches spec acceptance criteria |
+| `standards-compliance.sensor.md` | AI verifies implementation matches `rules/` semantically |
 
-Copy `.rig/feedforward/specs/_TEMPLATE.spec.md`:
-
-```bash
-cp .rig/feedforward/specs/_TEMPLATE.spec.md \
-   .rig/feedforward/specs/my-first-feature.spec.md
-```
-
-Fill in: Problem, Goal, Out of Scope, User Stories, Acceptance Criteria, Approved Fixtures.
-
-**Step 4 — Create tasks**
-
-Copy `.rig/feedforward/tasks/_TEMPLATE.task.md` for each task. Or ask your AI agent:
-
-> "Read `.rig/feedforward/specs/my-first-feature.spec.md` and `.rig/HARNESS.md`. Break this spec into tasks following the task template in `.rig/feedforward/tasks/_TEMPLATE.task.md`. Save each task as a separate file."
-
-**Step 5 — Start working**
-
-Give your agent this prompt to start any session:
-
-> "Read `.rig/HARNESS.md` and `.rig/memory/bootstrap.md`. Then read the task we're working on and implement it following all rules and conventions."
+To add any sensor: copy `_TEMPLATE.sensor.md`, fill in `## Command`, and `rig-spec validate` picks it up automatically.
 
 ---
 
@@ -195,14 +320,14 @@ Optional adapters in `.rig/adapters/` provide tool-specific optimizations.
 
 ---
 
-## Documentation
+## Manual Installation (No Internet Required)
 
-| Document | Contents |
-|---|---|
-| [VISION.md](VISION.md) | What rig-spec is, why it exists, the 13 failure patterns it solves |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Layer structure, skills system, MCP integration, harness levels |
-| [WORKFLOW.md](WORKFLOW.md) | Complete development flow, two-agent pattern, CLI reference |
-| [ROADMAP.md](ROADMAP.md) | Build phases, decision log, explicit non-goals |
+```bash
+git clone https://github.com/axel-andrade/rig-spec.git
+cp -r rig-spec/templates/.rig your-project/
+```
+
+Then fill in `.rig/HARNESS.md` and start with your first spec.
 
 ---
 
@@ -233,14 +358,12 @@ These files are injected into the agent's context before every task. The agent k
 
 ### Sensors That Enforce Standards
 
-Standards files define the rules. Sensors verify they were followed.
-
 **Computational sensors (fast, deterministic):**
 ```
 .rig/feedback/sensors/
-├── arch.sensor.md               ← dependency-cruiser / ArchUnit checks module boundaries
-├── naming.sensor.md             ← ESLint custom rules check naming conventions
-└── structure.sensor.md          ← scripts check folder/file organization
+├── arch.sensor.md        ← checks module boundaries (dependency-cruiser)
+├── naming.sensor.md      ← checks naming conventions (ESLint custom rules)
+└── structure.sensor.md   ← checks folder/file organization
 ```
 
 **Inferential sensor (AI, semantic):**
@@ -249,65 +372,18 @@ Standards files define the rules. Sensors verify they were followed.
 └── standards-compliance.sensor.md  ← AI reviewer reads rules/ and checks implementation
 ```
 
-The inferential sensor catches what linters cannot: "this service is doing domain logic that belongs in the domain layer", "this component should be in `features/` not `components/`", "this API response format doesn't follow our standard envelope".
+The inferential sensor catches what linters cannot: wrong layer for business logic, component in the wrong folder, API response that doesn't follow the project envelope.
 
-### For New Projects — Define Upfront
+---
 
-When running `rig-spec init`, you choose your architecture pattern:
+## Documentation
 
-```bash
-npx rig-spec init
-# → "What architecture? (clean / mvc / ddd / none)"
-# → "Frontend included? (react / vue / none)"
-# → Generates pre-filled rules templates for your stack
-```
-
-You get rules files already structured for your choices. Fill in the specifics, and enforcement starts on the first task.
-
-### For Existing Projects — Discover First
-
-When running `rig-spec init --retrofit`, or at any point:
-
-```bash
-npx rig-spec discover
-```
-
-**What `discover` does:**
-1. Analyzes your codebase — folder structure, file naming, import patterns, class/component shapes
-2. Generates **draft** standards files in `.rig/feedforward/rules/`
-3. Marks every discovery as `[DRAFT — please review]`
-4. You review, correct, and approve each rule
-5. Sensors are configured automatically based on approved rules
-
-**Why human review is required:** Discovered patterns may be accidents, not decisions. The human approves what's intentional. What's intentional becomes a rule. Rules become sensors.
-
-### How It Works End to End
-
-```
-1. rig-spec discover (or init)
-   → .rig/feedforward/rules/*.rules.md created
-
-2. rig-spec run task-01
-   → agent receives: task + spec + ALL rules files
-   → agent knows your patterns before writing code
-
-3. rig-spec validate task-01
-   → arch.sensor    → checks module boundaries (dependency-cruiser)
-   → naming.sensor  → checks naming (ESLint custom rules)
-   → standards-compliance.sensor → AI checks semantic compliance with rules/
-   → validator agent confirms everything
-
-4. FAILED: "UserService imports directly from PaymentRepository — violates arch rules"
-   → implementer receives specific violation
-   → fixes it
-   → retry
-```
-
-### Standards as Living Documentation
-
-Your `rules/` files are not just enforcement tools — they are the documented contract of how your project is built. Any new developer (human or AI) reads them and immediately understands the codebase conventions.
-
-When a pattern evolves, you update the rule. The sensors immediately enforce the new pattern everywhere going forward.
+| Document | Contents |
+|---|---|
+| [VISION.md](VISION.md) | What rig-spec is, why it exists, the 13 failure patterns it solves |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Layer structure, skills system, MCP integration, harness levels |
+| [WORKFLOW.md](WORKFLOW.md) | Complete development flow, two-agent pattern, CLI reference |
+| [ROADMAP.md](ROADMAP.md) | Build phases, decision log, explicit non-goals |
 
 ---
 
@@ -318,6 +394,7 @@ When a pattern evolves, you update the rule. The sensors immediately enforce the
 - ❌ Something that reorganizes your existing project
 - ❌ A replacement for your development tools
 - ❌ A prompt collection
+- ❌ A Node.js package or anything that requires a runtime
 
 **rig-spec is the structure around your agents — not a replacement for them.**
 

@@ -6,6 +6,8 @@ set -e
 RIGSPEC_VERSION="0.1.0"
 RIG_DIR=".rig"
 REPO="https://github.com/axel-andrade/rig-spec"
+PROJECT_DESCRIPTION=""
+RETROFIT=false
 
 # ─────────────────────────────────────────────
 # Colors
@@ -124,6 +126,36 @@ detect_sensors() {
   fi
 }
 
+# Refines stack detection using free-text description keywords.
+# Only overrides if the file-based detection found nothing.
+refine_stack_from_description() {
+  local desc="${PROJECT_DESCRIPTION,,}"
+  [ -z "$desc" ] && return
+
+  # Only override if still unknown
+  if [ "$STACK" = "unknown" ]; then
+    if echo "$desc" | grep -qE "next\.?js|nextjs"; then
+      STACK="nextjs"; STACK_LABEL="Next.js"
+    elif echo "$desc" | grep -qE "nest\.?js|nestjs"; then
+      STACK="nestjs"; STACK_LABEL="NestJS"
+    elif echo "$desc" | grep -qE "\bexpress\b"; then
+      STACK="express"; STACK_LABEL="Express"
+    elif echo "$desc" | grep -qE "react|vue|angular|svelte|vite"; then
+      STACK="node"; STACK_LABEL="Node.js"
+    elif echo "$desc" | grep -qE "fastapi|django|flask|\bpython\b"; then
+      STACK="python"; STACK_LABEL="Python"
+    elif echo "$desc" | grep -qE "\bgo\b|golang"; then
+      STACK="go"; STACK_LABEL="Go"
+    elif echo "$desc" | grep -qE "\brust\b|cargo"; then
+      STACK="rust"; STACK_LABEL="Rust"
+    fi
+
+    if [ "$STACK" != "unknown" ]; then
+      print_ok "Stack inferred from description: $STACK_LABEL"
+    fi
+  fi
+}
+
 # ─────────────────────────────────────────────
 # Template Writers
 # ─────────────────────────────────────────────
@@ -150,7 +182,7 @@ write_harness_md() {
 
 **Name:** $project_name
 **Stack:** $STACK_LABEL
-**Description:** [Add a one-paragraph description of this project]
+**Description:** ${PROJECT_DESCRIPTION:-[Add a one-paragraph description of this project]}
 
 ---
 
@@ -674,6 +706,907 @@ EOF
   print_ok "feedforward/rules/ templates created (5 files)"
 }
 
+# ─────────────────────────────────────────────
+# Topology: Node.js / NestJS / Express
+# ─────────────────────────────────────────────
+
+write_rules_node() {
+  cat > "$RIG_DIR/feedforward/rules/architecture.rules.md" << 'EOF'
+# Architecture Rules — Node.js (Layered)
+
+---
+
+## Layer Hierarchy
+
+```
+Controllers → Services → Repositories → Database
+```
+
+- `controllers/` handle HTTP: parse request, call service, return response. No business logic.
+- `services/` contain all business logic. No HTTP concerns. No direct DB access.
+- `repositories/` handle all database queries. Return domain objects, not raw rows.
+- `shared/` utilities may be imported by any layer.
+
+## Module Boundaries
+
+- A controller may ONLY import from its own service.
+- A service may ONLY import from repositories and shared/.
+- A repository may NOT import from controllers or services.
+- Cross-module imports go through interfaces, not concrete implementations.
+
+## Forbidden Patterns
+
+- Direct database access from a controller
+- HTTP request/response objects inside a service
+- Business logic inside a controller
+- Raw SQL inside a service (use the repository)
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/arch.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/naming.rules.md" << 'EOF'
+# Naming Rules — Node.js / TypeScript
+
+---
+
+## Files
+
+- Controllers: `[name].controller.ts`
+- Services: `[name].service.ts`
+- Repositories: `[name].repository.ts`
+- DTOs (input): `[name].dto.ts`
+- Interfaces: `[name].interface.ts`
+- Types: `[name].types.ts`
+- Tests: `[name].spec.ts` or `[name].test.ts`
+- Modules (NestJS): `[name].module.ts`
+
+## Classes
+
+- PascalCase with suffix: `UserService`, `OrderRepository`, `CreateUserDto`
+
+## Functions and Methods
+
+- camelCase: `getUserById`, `createOrder`, `validateEmail`
+- Boolean helpers: `is`, `has`, `can` prefix: `isActive`, `hasPermission`
+
+## Variables and Constants
+
+- camelCase for variables: `userId`, `orderTotal`
+- SCREAMING_SNAKE_CASE for module-level constants: `MAX_RETRY_COUNT`
+- Env vars: `SCREAMING_SNAKE_CASE`
+
+## Interfaces vs Types
+
+- Use `interface` for object shapes that may be extended
+- Use `type` for unions, intersections, and utility types
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/naming.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/api.rules.md" << 'EOF'
+# API Rules — REST / Node.js
+
+---
+
+## Response Envelope
+
+All endpoints return the same envelope:
+
+```json
+{ "data": { ... }, "error": null }
+```
+
+On error:
+```json
+{ "data": null, "error": { "code": "ERROR_CODE", "message": "Human-readable message" } }
+```
+
+## HTTP Methods
+
+- `GET    /[resource]`         — list (paginated)
+- `GET    /[resource]/:id`     — single item
+- `POST   /[resource]`         — create
+- `PUT    /[resource]/:id`     — full replace
+- `PATCH  /[resource]/:id`     — partial update
+- `DELETE /[resource]/:id`     — delete
+
+## Status Codes
+
+- `200` OK (GET, PUT, PATCH)
+- `201` Created (POST)
+- `204` No Content (DELETE)
+- `400` Bad Request (validation)
+- `401` Unauthorized (missing/invalid token)
+- `403` Forbidden (insufficient permissions)
+- `404` Not Found
+- `422` Unprocessable Entity (business rule violation)
+- `500` Internal Server Error (unexpected)
+
+## Validation
+
+- Validate all inputs at the controller/route level using DTOs or schema validation.
+- Never trust client-provided IDs without authorization checks.
+- Return `400` for schema violations, `422` for business rule violations.
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/standards-compliance.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/testing.rules.md" << 'EOF'
+# Testing Rules — Node.js / Jest
+
+---
+
+## Test Structure
+
+- Unit tests: `src/[module]/[name].spec.ts` (next to the file)
+- Integration tests: `test/` or `src/__tests__/`
+- E2E tests: `test/e2e/`
+
+## Coverage
+
+- Services: minimum 80% line coverage
+- Repositories: covered by integration tests, not unit tests
+- Controllers: covered by E2E or integration tests
+
+## Rules
+
+- Do NOT mock the database in integration tests — use a real test database.
+- Do NOT change a test to make it pass — fix the implementation.
+- Test names describe behavior: `"should return 404 when user is not found"`
+- One assertion per test where possible.
+- Use `beforeEach` for setup, `afterEach`/`afterAll` for cleanup.
+
+## Approved Fixtures Policy
+
+- Expected outputs are defined in the spec BEFORE agents write tests.
+- Agents may NOT modify a fixture to make a test pass.
+- If a fixture is wrong, raise it with the human — do not change it silently.
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/test.sensor.md` (Level 3)
+EOF
+
+  print_ok "feedforward/rules/ filled for Node.js stack (4 files)"
+}
+
+write_skills_node() {
+  cat > "$RIG_DIR/feedforward/skills/typescript.skill.md" << 'EOF'
+# Skill: TypeScript
+
+> Load when writing any TypeScript code in this project.
+
+---
+
+## Context
+
+This project uses TypeScript throughout. All new code must be typed.
+Strict mode is enabled — no implicit `any`.
+
+---
+
+## Patterns to Follow
+
+### Strict typing
+- Never use `any`. Use `unknown` when the type is truly unknown, then narrow it.
+- Prefer interfaces for object shapes; types for unions and utility types.
+- Use `readonly` for properties that should not be mutated.
+
+### Null safety
+- Avoid `!` (non-null assertion). Handle `null`/`undefined` explicitly.
+- Use optional chaining `?.` and nullish coalescing `??`.
+
+### Generics
+- Use generics when a function works with multiple types.
+- Name generic params descriptively: `TEntity`, `TResult` over `T`.
+
+---
+
+## Pitfalls to Avoid
+
+- Do NOT use `any` to silence type errors — fix the type.
+- Do NOT use `@ts-ignore` without a comment explaining why.
+- Do NOT cast with `as` unless you have verified the shape at runtime.
+
+---
+
+## Key Files
+
+- `tsconfig.json` — compiler options
+EOF
+  print_ok "feedforward/skills/typescript.skill.md created"
+
+  cat > "$RIG_DIR/feedforward/skills/nodejs.skill.md" << 'EOF'
+# Skill: Node.js
+
+> Load when working on server-side code, modules, or runtime behavior.
+
+---
+
+## Context
+
+This is a Node.js server application. All async operations use `async/await`.
+Error handling follows the layered pattern — errors bubble up to the controller/route handler.
+
+---
+
+## Patterns to Follow
+
+### Async/await
+- Always `await` promises. Never leave floating promises.
+- Wrap async route handlers to catch unhandled rejections.
+
+### Error handling
+- Services throw typed errors (e.g., `UserNotFoundError extends Error`).
+- Controllers/route handlers catch and convert to HTTP responses.
+- Never swallow errors silently — log or rethrow.
+
+### Environment config
+- All config from environment variables, validated at startup.
+- Never hardcode secrets, URLs, or credentials.
+- Use a config module/object — not `process.env` scattered through the codebase.
+
+---
+
+## Pitfalls to Avoid
+
+- Do NOT use `require()` — use ES module `import`.
+- Do NOT use `process.exit()` in library code.
+- Do NOT block the event loop with synchronous I/O.
+
+---
+
+## Key Files
+
+- `package.json` — scripts and dependencies
+EOF
+  print_ok "feedforward/skills/nodejs.skill.md created"
+}
+
+# ─────────────────────────────────────────────
+# Topology: Python / FastAPI
+# ─────────────────────────────────────────────
+
+write_rules_python() {
+  cat > "$RIG_DIR/feedforward/rules/architecture.rules.md" << 'EOF'
+# Architecture Rules — Python (Layered)
+
+---
+
+## Layer Hierarchy
+
+```
+Routers → Services → Repositories → Database
+```
+
+- `routers/` handle HTTP: parse request, call service, return response. No business logic.
+- `services/` contain all business logic. No HTTP concerns. No direct DB access.
+- `repositories/` handle all database queries. Return domain models, not raw rows.
+- `core/` or `shared/` utilities may be imported by any layer.
+
+## Module Boundaries
+
+- A router may ONLY import from its own service.
+- A service may ONLY import from repositories and shared/core.
+- A repository may NOT import from routers or services.
+
+## Forbidden Patterns
+
+- Direct database session access from a router/endpoint
+- HTTP request objects inside a service
+- Business logic inside a router function
+- Raw SQL inside a service (use the repository)
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/arch.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/naming.rules.md" << 'EOF'
+# Naming Rules — Python
+
+---
+
+## Files and Modules
+
+- All file names: `snake_case.py`
+- Routers: `[name]_router.py` or `[name].py` in `routers/`
+- Services: `[name]_service.py`
+- Repositories: `[name]_repository.py`
+- Models: `[name].py` in `models/`
+- Schemas (Pydantic): `[name]_schema.py` or `[name].py` in `schemas/`
+- Tests: `test_[name].py`
+
+## Classes
+
+- PascalCase: `UserService`, `OrderRepository`, `CreateUserSchema`
+- Pydantic models: PascalCase with semantic suffix: `UserResponse`, `CreateUserRequest`
+
+## Functions and Methods
+
+- snake_case: `get_user_by_id`, `create_order`, `validate_email`
+- Boolean helpers: `is_`, `has_`, `can_` prefix: `is_active`, `has_permission`
+
+## Variables and Constants
+
+- snake_case for variables: `user_id`, `order_total`
+- SCREAMING_SNAKE_CASE for module-level constants: `MAX_RETRY_COUNT`
+- Env vars: `SCREAMING_SNAKE_CASE`
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/naming.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/api.rules.md" << 'EOF'
+# API Rules — REST / FastAPI
+
+---
+
+## Response Envelope
+
+All endpoints return the same envelope:
+
+```json
+{ "data": { ... }, "error": null }
+```
+
+On error:
+```json
+{ "data": null, "error": { "code": "ERROR_CODE", "message": "Human-readable message" } }
+```
+
+## HTTP Methods
+
+- `GET    /[resource]`         — list (paginated)
+- `GET    /[resource]/{id}`    — single item
+- `POST   /[resource]`         — create
+- `PUT    /[resource]/{id}`    — full replace
+- `PATCH  /[resource]/{id}`    — partial update
+- `DELETE /[resource]/{id}`    — delete
+
+## Status Codes
+
+- `200` OK
+- `201` Created
+- `204` No Content (DELETE)
+- `400` Bad Request (validation)
+- `401` Unauthorized
+- `403` Forbidden
+- `404` Not Found
+- `422` Unprocessable Entity (FastAPI default for validation errors)
+- `500` Internal Server Error
+
+## Input Validation
+
+- Use Pydantic schemas for all request bodies.
+- Path and query parameters validated with type annotations.
+- Never trust client input — validate before passing to service.
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/standards-compliance.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/testing.rules.md" << 'EOF'
+# Testing Rules — Python / pytest
+
+---
+
+## Test Structure
+
+- All test files: `test_[module].py`
+- Location: `tests/` at project root, mirroring `src/` structure
+- Integration tests: `tests/integration/`
+
+## Coverage
+
+- Services: minimum 80% line coverage
+- Repositories: covered by integration tests against a real test database
+- Routers: covered by integration tests using TestClient
+
+## Rules
+
+- Do NOT mock the database in integration tests — use a real test database.
+- Do NOT change a test to make it pass — fix the implementation.
+- Test function names describe behavior: `test_returns_404_when_user_not_found`
+- Use `pytest.fixture` for reusable setup — not `setUp` class methods.
+- Use `parametrize` for data-driven tests.
+
+## Approved Fixtures Policy
+
+- Expected outputs are defined in the spec BEFORE agents write tests.
+- Agents may NOT modify a fixture to make a test pass.
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/test.sensor.md` (Level 3)
+EOF
+
+  print_ok "feedforward/rules/ filled for Python stack (4 files)"
+}
+
+write_skills_python() {
+  cat > "$RIG_DIR/feedforward/skills/fastapi.skill.md" << 'EOF'
+# Skill: FastAPI
+
+> Load when writing FastAPI routers, dependencies, or middleware.
+
+---
+
+## Context
+
+This project uses FastAPI for the HTTP layer. Routes are organized by domain in `routers/`.
+Dependency injection is used for services, database sessions, and authentication.
+
+---
+
+## Patterns to Follow
+
+### Router organization
+```python
+router = APIRouter(prefix="/users", tags=["users"])
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(user_id: int, service: UserService = Depends(get_user_service)):
+    return await service.get_by_id(user_id)
+```
+
+### Dependency injection
+- Database sessions injected via `Depends(get_db)`.
+- Services injected via `Depends(get_[name]_service)`.
+- Authentication via `Depends(get_current_user)`.
+
+### Error handling
+- Raise `HTTPException` in routers for HTTP-layer errors.
+- Services raise domain exceptions (e.g., `UserNotFoundError`).
+- A middleware or exception handler converts domain errors to HTTP responses.
+
+---
+
+## Pitfalls to Avoid
+
+- Do NOT put business logic in router functions.
+- Do NOT use global state for the database session.
+- Do NOT return raw SQLAlchemy model objects — use Pydantic schemas.
+
+---
+
+## Key Files
+
+- `main.py` — app creation and router registration
+- `dependencies.py` — shared FastAPI dependencies
+EOF
+  print_ok "feedforward/skills/fastapi.skill.md created"
+
+  cat > "$RIG_DIR/feedforward/skills/python.skill.md" << 'EOF'
+# Skill: Python
+
+> Load when writing any Python code in this project.
+
+---
+
+## Context
+
+Python 3.11+. All async I/O uses `async/await`. Type hints required on all function signatures.
+
+---
+
+## Patterns to Follow
+
+### Type hints
+```python
+def get_user(user_id: int) -> UserResponse:
+    ...
+
+async def create_order(data: CreateOrderDto) -> Order:
+    ...
+```
+
+### Error handling
+- Define custom exception classes for domain errors.
+- Never catch bare `except:` — always catch a specific exception type.
+- Log errors before re-raising or converting.
+
+### Async
+- All I/O-bound operations are `async`.
+- Never call blocking I/O inside an async function — use async libraries.
+
+---
+
+## Pitfalls to Avoid
+
+- Do NOT use mutable default arguments: `def f(items=[])` is a bug.
+- Do NOT ignore return values of functions that signal errors.
+- Do NOT use `print()` for logging — use the `logging` module.
+
+---
+
+## Key Files
+
+- `pyproject.toml` — project config, dependencies, tool settings
+EOF
+  print_ok "feedforward/skills/python.skill.md created"
+}
+
+# ─────────────────────────────────────────────
+# Topology: Next.js / Fullstack
+# ─────────────────────────────────────────────
+
+write_rules_nextjs() {
+  cat > "$RIG_DIR/feedforward/rules/architecture.rules.md" << 'EOF'
+# Architecture Rules — Next.js (App Router)
+
+---
+
+## Layer Hierarchy
+
+```
+Pages/Components → Server Actions / API Routes → Services → Repositories → Database
+```
+
+- `app/` — Next.js App Router pages and layouts. No business logic.
+- `components/` — React components. Receive data as props or via server components.
+- `lib/` or `server/` — Server-side services and repositories. Never imported by client components.
+- `api/` routes — thin HTTP handlers that call services.
+
+## Client vs Server
+
+- Server Components fetch data directly. Client Components receive data as props.
+- Mark files `"use client"` only when browser APIs or interactivity is needed.
+- Never import server-only modules (DB, secrets) in client components.
+
+## Module Boundaries
+
+- `components/` may NOT import from `lib/server/` or repositories.
+- `app/` pages are thin — data fetching in Server Components, logic in lib/services.
+- `lib/` services are framework-agnostic — no Next.js imports.
+
+## Forbidden Patterns
+
+- Direct database access inside a React component
+- `"use client"` on a component that does not need it
+- Environment secrets accessed on the client side
+- Business logic inside API route handlers
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/arch.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/naming.rules.md" << 'EOF'
+# Naming Rules — Next.js / TypeScript / React
+
+---
+
+## Files
+
+- Pages (App Router): `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`
+- Components: `PascalCase.tsx` — `UserCard.tsx`, `OrderList.tsx`
+- Server actions: `[name].actions.ts`
+- API routes: `route.ts` (inside `app/api/[resource]/`)
+- Services: `[name].service.ts`
+- Repositories: `[name].repository.ts`
+- Hooks: `use[Name].ts` — `useUser.ts`, `useOrderList.ts`
+- Types: `[name].types.ts`
+- Tests: `[name].test.tsx` or `[name].spec.tsx`
+
+## Components
+
+- PascalCase: `UserCard`, `OrderSummary`, `NavigationMenu`
+- Default export for page-level components; named exports for shared components.
+
+## Functions
+
+- camelCase: `getUserById`, `formatCurrency`
+- React event handlers: `handle[Event]`: `handleSubmit`, `handleUserClick`
+- Boolean helpers: `is`, `has`, `can` prefix
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/naming.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/component.rules.md" << 'EOF'
+# Component Rules — React / Next.js
+
+---
+
+## Component Types
+
+### Server Components (default in App Router)
+- Fetch data directly (database, API).
+- Cannot use hooks, browser APIs, or event handlers.
+- Pass data down to Client Components as props.
+
+### Client Components (`"use client"`)
+- Use only when hooks, state, or browser APIs are needed.
+- Keep as small and leaf-level as possible.
+- Never fetch directly from a database — receive data as props or via Server Actions.
+
+## Props
+
+- All props explicitly typed with TypeScript interfaces.
+- No `any` in prop types.
+- Optional props use `?` and have sensible defaults.
+
+## State Management
+
+- Local UI state: `useState`.
+- Server state: React Query / SWR, or Server Components with revalidation.
+- Avoid global state for data that belongs in the server layer.
+
+## Composition
+
+- Prefer composition over configuration — small focused components over large ones with many props.
+- Extract reusable UI into `components/ui/`.
+- Domain-specific components live in `components/[domain]/`.
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/standards-compliance.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/api.rules.md" << 'EOF'
+# API Rules — Next.js API Routes
+
+---
+
+## Response Envelope
+
+```typescript
+{ data: T | null, error: { code: string; message: string } | null }
+```
+
+## Route Handler Pattern
+
+```typescript
+// app/api/[resource]/route.ts
+export async function GET(request: Request) {
+  try {
+    const data = await service.list()
+    return Response.json({ data, error: null })
+  } catch (err) {
+    return Response.json({ data: null, error: { code: 'INTERNAL', message: 'Unexpected error' } }, { status: 500 })
+  }
+}
+```
+
+## HTTP Methods
+
+- `GET`    — read (list or single)
+- `POST`   — create
+- `PUT`    — full replace
+- `PATCH`  — partial update
+- `DELETE` — delete
+
+## Server Actions vs API Routes
+
+- Prefer Server Actions for form mutations — no extra route needed.
+- Use API Routes for: external webhooks, mobile clients, public APIs.
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/standards-compliance.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/testing.rules.md" << 'EOF'
+# Testing Rules — Next.js / Jest + Testing Library
+
+---
+
+## Test Structure
+
+- Component tests: `[ComponentName].test.tsx` (next to the component)
+- Service/util tests: `[name].test.ts`
+- Integration tests: `tests/integration/`
+- E2E tests: `tests/e2e/` (Playwright)
+
+## Rules
+
+- Test component behavior, not implementation.
+- Use `@testing-library/react` — query by role/label, not class names.
+- Do NOT test internal state directly.
+- Server Components: use integration tests, not unit tests.
+- Approved Fixtures define expected outputs — agents may NOT change them.
+
+## Coverage
+
+- Shared components: minimum 70% coverage
+- Services: minimum 80% coverage
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/test.sensor.md` (Level 3)
+EOF
+
+  print_ok "feedforward/rules/ filled for Next.js stack (5 files)"
+}
+
+write_skills_nextjs() {
+  cat > "$RIG_DIR/feedforward/skills/nextjs.skill.md" << 'EOF'
+# Skill: Next.js (App Router)
+
+> Load when working on pages, layouts, routing, or server-side logic.
+
+---
+
+## Context
+
+This project uses Next.js 14+ with the App Router. Server Components are the default.
+Data fetching happens server-side; client components handle interactivity only.
+
+---
+
+## Patterns to Follow
+
+### Data fetching in Server Components
+```tsx
+// app/users/page.tsx
+export default async function UsersPage() {
+  const users = await userService.list()  // direct service call
+  return <UserList users={users} />
+}
+```
+
+### Server Actions for mutations
+```tsx
+// app/users/actions.ts
+"use server"
+export async function createUser(formData: FormData) {
+  await userService.create({ name: formData.get("name") as string })
+  revalidatePath("/users")
+}
+```
+
+### Route handlers
+```typescript
+// app/api/users/route.ts
+export async function GET() {
+  const users = await userService.list()
+  return Response.json({ data: users, error: null })
+}
+```
+
+---
+
+## Pitfalls to Avoid
+
+- Do NOT add `"use client"` to components that do not need it.
+- Do NOT import server modules into client components.
+- Do NOT use `useEffect` for initial data fetching — use Server Components.
+
+---
+
+## Key Files
+
+- `app/` — all routes and layouts
+- `lib/` — server-side services and utilities
+- `components/` — shared UI components
+EOF
+  print_ok "feedforward/skills/nextjs.skill.md created"
+
+  cat > "$RIG_DIR/feedforward/skills/react.skill.md" << 'EOF'
+# Skill: React
+
+> Load when writing React components or hooks.
+
+---
+
+## Context
+
+React 18+. Components are Server Components by default in Next.js App Router.
+Add `"use client"` only when hooks or browser APIs are needed.
+
+---
+
+## Patterns to Follow
+
+### Component structure
+```tsx
+interface UserCardProps {
+  user: User
+  onSelect?: (id: string) => void
+}
+
+export function UserCard({ user, onSelect }: UserCardProps) {
+  return (
+    <div onClick={() => onSelect?.(user.id)}>
+      {user.name}
+    </div>
+  )
+}
+```
+
+### Custom hooks
+```tsx
+// hooks/useUser.ts
+export function useUser(id: string) {
+  return useQuery({ queryKey: ["user", id], queryFn: () => fetchUser(id) })
+}
+```
+
+---
+
+## Pitfalls to Avoid
+
+- Do NOT mutate state directly — always use `setState` or `useReducer`.
+- Do NOT use `index` as a `key` in lists with dynamic items.
+- Do NOT derive state in `useEffect` — derive it during render.
+
+---
+
+## Key Files
+
+- `components/` — shared and domain components
+EOF
+  print_ok "feedforward/skills/react.skill.md created"
+}
+
+# ─────────────────────────────────────────────
+# Topology Dispatchers
+# ─────────────────────────────────────────────
+
+write_topology_rules() {
+  # Retrofit always writes generic [DRAFT] stubs — never overwrite existing patterns
+  if [ "$RETROFIT" = true ]; then
+    write_rules_templates
+    return
+  fi
+  case "$STACK" in
+    node|nestjs|express) write_rules_node ;;
+    python)              write_rules_python ;;
+    nextjs)              write_rules_nextjs ;;
+    *)                   write_rules_templates ;;
+  esac
+}
+
+write_topology_skills() {
+  # Retrofit skips skill generation — existing project may already have conventions
+  if [ "$RETROFIT" = true ]; then
+    write_skill_template
+    return
+  fi
+  case "$STACK" in
+    node|nestjs|express) write_skills_node ;;
+    python)              write_skills_python ;;
+    nextjs)              write_skills_nextjs ;;
+    *)                   write_skill_template ;;
+  esac
+}
+
 write_sensor_templates() {
   for sensor in "${SENSORS[@]}"; do
     case "$sensor" in
@@ -819,14 +1752,73 @@ Exit code 0. [Any additional conditions.]
 EOF
 }
 
+# Generates AI tool entry point files at the project root.
+# All files contain the same minimal instruction: read HARNESS.md first.
+# Skips any file that already exists (respects existing config).
+write_agent_entrypoints() {
+  local project_name
+  project_name=$(basename "$(pwd)")
+  local created=()
+  local skipped=()
+
+  local content="# $project_name — AI Agent Instructions
+
+Read \`.rig/HARNESS.md\` and \`.rig/memory/bootstrap.md\` at the start of every session.
+This is required for full project context before taking any action.
+"
+
+  # Map: filename → tool name
+  declare -A entrypoints
+  entrypoints["CLAUDE.md"]="Claude Code"
+  entrypoints["AGENTS.md"]="Generic (any agent)"
+  entrypoints[".cursorrules"]="Cursor"
+  entrypoints[".windsurfrules"]="Windsurf"
+  entrypoints["GEMINI.md"]="Gemini"
+
+  for file in "CLAUDE.md" "AGENTS.md" ".cursorrules" ".windsurfrules" "GEMINI.md"; do
+    if [ -f "$file" ]; then
+      skipped+=("$file")
+    else
+      printf '%s' "$content" > "$file"
+      created+=("$file")
+    fi
+  done
+
+  # GitHub Copilot needs a directory
+  if [ -f ".github/copilot-instructions.md" ]; then
+    skipped+=(".github/copilot-instructions.md")
+  else
+    mkdir -p ".github"
+    printf '%s' "$content" > ".github/copilot-instructions.md"
+    created+=(".github/copilot-instructions.md")
+  fi
+
+  if [ ${#created[@]} -gt 0 ]; then
+    print_ok "Agent entry points created: ${created[*]}"
+  fi
+  if [ ${#skipped[@]} -gt 0 ]; then
+    print_warn "Already existed (not overwritten): ${skipped[*]}"
+  fi
+}
+
 # ─────────────────────────────────────────────
 # cmd_init
 # ─────────────────────────────────────────────
 
 cmd_init() {
   local retrofit=false
-  for arg in "$@"; do
-    [ "$arg" = "--retrofit" ] && retrofit=true
+  local template_override=""
+  local args=("$@")
+  local i=0
+  while [ $i -lt ${#args[@]} ]; do
+    case "${args[$i]}" in
+      --retrofit) retrofit=true; RETROFIT=true ;;
+      --template)
+        i=$(( i + 1 ))
+        template_override="${args[$i]}" ;;
+      --template=*) template_override="${args[$i]#--template=}" ;;
+    esac
+    i=$(( i + 1 ))
   done
 
   echo ""
@@ -845,8 +1837,25 @@ cmd_init() {
     echo ""
   fi
 
+  # Free-text description
+  echo -e "  ${DIM}Describe your project in one sentence (Enter to skip):${RESET}"
+  read -r -p "  → " PROJECT_DESCRIPTION
+  echo ""
+
   print_step "Detecting project..."
   detect_stack
+  refine_stack_from_description
+  if [ -n "$template_override" ]; then
+    STACK="$template_override"
+    case "$STACK" in
+      node-api)         STACK="node";   STACK_LABEL="Node.js (node-api template)" ;;
+      python-api)       STACK="python"; STACK_LABEL="Python (python-api template)" ;;
+      fullstack-nextjs) STACK="nextjs"; STACK_LABEL="Next.js (fullstack-nextjs template)" ;;
+      generic)          STACK="unknown"; STACK_LABEL="Generic (language agnostic)" ;;
+      *) print_warn "Unknown template '$STACK' — using generic" ; STACK="unknown"; STACK_LABEL="Generic" ;;
+    esac
+    print_ok "Template override: $STACK_LABEL"
+  fi
   detect_sensors
   echo ""
 
@@ -872,10 +1881,13 @@ cmd_init() {
   write_spec_template
   write_task_template
   write_contract_template
-  write_skill_template
-  write_rules_templates
+  write_topology_rules
+  write_topology_skills
   write_sensor_generic_template
   write_sensor_templates
+
+  print_step "Creating agent entry points..."
+  write_agent_entrypoints
 
   echo ""
   echo -e "${CYAN}──────────────────────────────────────${RESET}"
@@ -884,18 +1896,35 @@ cmd_init() {
   echo ""
   echo -e "  ${BOLD}Project:${RESET} $(basename "$(pwd)")"
   echo -e "  ${BOLD}Stack:${RESET} $STACK_LABEL"
+  if [ "$RETROFIT" = true ]; then
+    echo -e "  ${BOLD}Mode:${RESET} retrofit (rules as [DRAFT] — fill in your existing patterns)"
+  else
+    echo -e "  ${BOLD}Template:${RESET} $( [ "$STACK" = "unknown" ] && echo "generic" || echo "$STACK (rules + skills pre-filled)" )"
+  fi
   echo -e "  ${BOLD}Level:${RESET} 1 (Spec Only)"
   if [ ${#SENSORS[@]} -gt 0 ]; then
     echo -e "  ${BOLD}Sensors:${RESET} ${SENSORS[*]}"
   fi
+  echo -e "  ${BOLD}Entry points:${RESET} CLAUDE.md, AGENTS.md, .cursorrules, .windsurfrules, GEMINI.md, .github/copilot-instructions.md"
   echo ""
   echo "  Next steps:"
   echo ""
-  echo "  1. Edit .rig/HARNESS.md — add your project description"
-  echo "  2. Create your first spec:"
-  echo "     cp .rig/feedforward/specs/_TEMPLATE.spec.md \\"
-  echo "        .rig/feedforward/specs/my-feature.spec.md"
-  echo "  3. Check status anytime: rig-spec status"
+  if [ -z "$PROJECT_DESCRIPTION" ]; then
+    echo "  1. Edit .rig/HARNESS.md — add your project description"
+  else
+    echo "  1. Review .rig/HARNESS.md — description already filled"
+  fi
+  if [ "$RETROFIT" = true ]; then
+    echo "  2. Fill in .rig/feedforward/rules/ — capture your existing patterns"
+    echo "     Remove [DRAFT] markers when each rule file is complete"
+    echo "  3. Create your first spec:"
+    echo "     rig-spec shape \"feature name\""
+  else
+    echo "  2. Create your first spec:"
+    echo "     rig-spec shape \"feature name\""
+  fi
+  echo ""
+  echo "  Check status anytime: rig-spec status"
   echo ""
 }
 
@@ -1319,10 +2348,14 @@ cmd_run() {
   echo ""
   echo -e "  ${BOLD}Next steps:${RESET}"
   echo ""
-  echo "  1. Open $context_file"
-  echo "  2. Copy the full content"
-  echo "  3. Paste into your AI agent (Claude, Gemini, GPT, etc.)"
-  echo "  4. After the agent completes the task, run:"
+  echo "  1. Paste the context into your AI agent:"
+  echo ""
+  echo "     cat $context_file"
+  echo ""
+  echo "  2. Agent implements the task and signs the contract."
+  echo ""
+  echo "  3. Once the agent is done, run sensors:"
+  echo ""
   echo "     rig-spec validate"
   echo ""
 }
@@ -1415,14 +2448,13 @@ EOF
 
 cmd_shape() {
   require_rig
-  local feature="$1"
+  local feature=""
   local from_file=""
 
-  # Parse --from flag
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --from) from_file="$2"; shift 2 ;;
-      *)      feature="$*"; break ;;
+      *)      feature="${feature:+$feature }$1"; shift ;;
     esac
   done
 
@@ -1433,30 +2465,134 @@ cmd_shape() {
     exit 1
   fi
 
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec shape — $feature${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+  echo -e "  ${DIM}Answer a few questions to shape this spec.${RESET}"
+  echo -e "  ${DIM}Press Enter to skip any question.${RESET}"
+  echo ""
+
+  # ── Interactive questions ──────────────────
+  echo -e "  ${BOLD}1. What problem does this solve?${RESET}"
+  echo -e "  ${DIM}(What's broken or missing today?)${RESET}"
+  read -r -p "  → " q_problem
+  echo ""
+
+  echo -e "  ${BOLD}2. Who are the users?${RESET}"
+  echo -e "  ${DIM}(Who will use this feature?)${RESET}"
+  read -r -p "  → " q_users
+  echo ""
+
+  echo -e "  ${BOLD}3. What is the main goal?${RESET}"
+  echo -e "  ${DIM}(What changes for the user when this is done?)${RESET}"
+  read -r -p "  → " q_goal
+  echo ""
+
+  echo -e "  ${BOLD}4. What is explicitly out of scope?${RESET}"
+  echo -e "  ${DIM}(What will NOT be built in this spec?)${RESET}"
+  read -r -p "  → " q_out_of_scope
+  echo ""
+
+  echo -e "  ${BOLD}5. Any known constraints or design decisions?${RESET}"
+  echo -e "  ${DIM}(Architecture choices, limitations, dependencies — optional)${RESET}"
+  read -r -p "  → " q_constraints
+  echo ""
+
+  # ── Create spec file ──────────────────────
   local slug
   slug=$(echo "$feature" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
   local spec_file="$RIG_DIR/feedforward/specs/${slug}.spec.md"
 
-  cp "$RIG_DIR/feedforward/specs/_TEMPLATE.spec.md" "$spec_file"
-  # Replace template title with feature name
-  if command -v sed &>/dev/null; then
-    sed -i "s/\[Feature Name\]/$feature/g" "$spec_file"
+  # Build out-of-scope list
+  local oos_content="- Not included: [add more]"
+  if [ -n "$q_out_of_scope" ]; then
+    oos_content="- $q_out_of_scope"$'\n'"- [add more if needed]"
   fi
 
-  echo ""
-  print_ok "Spec file created: $spec_file"
+  # Build design notes
+  local design_content="[No constraints specified.]"
+  if [ -n "$q_constraints" ]; then
+    design_content="$q_constraints"
+  fi
+
+  cat > "$spec_file" << EOF
+# Spec: $feature
+
+---
+
+## Problem
+
+${q_problem:-[What problem does this feature solve? 2-4 sentences.]}
+
+---
+
+## Goal
+
+${q_goal:-[What is the measurable outcome? What changes for the user?]}
+
+---
+
+## Users
+
+${q_users:-[Who will use this feature?]}
+
+---
+
+## Out of Scope
+
+$oos_content
+
+---
+
+## User Stories
+
+- As a [user type], I want to [action] so that [benefit]
+- As a [user type], I want to [action] so that [benefit]
+
+---
+
+## Acceptance Criteria
+
+- [ ] [Criterion 1 — must be testable]
+- [ ] [Criterion 2 — must be testable]
+- [ ] [Criterion 3 — must be testable]
+
+---
+
+## Approved Fixtures
+
+> **HUMAN FILLS THIS SECTION.**
+> Define expected outputs before any agent writes tests.
+> The implementation must match these exactly.
+> Agents may NOT change a fixture to make a test pass.
+
+### Fixture 1: [scenario name]
+**Input:** [describe the input]
+**Expected output:** [describe the exact expected output]
+
+---
+
+## Design Notes
+
+$design_content
+EOF
+
+  print_ok "Spec created: $spec_file"
   echo ""
 
-  # Assemble context for the AI agent
+  # ── Assemble agent context ─────────────────
   local context_file="$RIG_DIR/context-shape-${slug}.md"
   {
-    echo "# Shape Spec: $feature"
+    echo "# Complete this spec: $feature"
     echo ""
-    echo "> Read everything below, then write a complete spec for: $feature"
+    echo "> You are helping write a spec for a software feature."
+    echo "> The human has already answered the key questions below."
+    echo "> Your job is to complete the missing sections following the rig-spec format."
     echo ""
     echo "---"
     echo ""
-    echo "## Project Overview"
+    echo "## Project Context"
     echo ""
     cat "$RIG_DIR/HARNESS.md"
     echo ""
@@ -1480,7 +2616,7 @@ cmd_shape() {
     fi
 
     if [ -n "$from_file" ] && [ -f "$from_file" ]; then
-      echo "## Input Document"
+      echo "## Input Document (provided by human)"
       echo ""
       cat "$from_file"
       echo ""
@@ -1488,31 +2624,69 @@ cmd_shape() {
       echo ""
     fi
 
-    echo "## Spec Template"
+    echo "## What the Human Already Defined"
     echo ""
-    cat "$RIG_DIR/feedforward/specs/_TEMPLATE.spec.md"
+    echo "**Feature:** $feature"
+    [ -n "$q_problem" ]      && echo "**Problem:** $q_problem"
+    [ -n "$q_goal" ]         && echo "**Goal:** $q_goal"
+    [ -n "$q_users" ]        && echo "**Users:** $q_users"
+    [ -n "$q_out_of_scope" ] && echo "**Out of scope:** $q_out_of_scope"
+    [ -n "$q_constraints" ]  && echo "**Constraints:** $q_constraints"
     echo ""
     echo "---"
     echo ""
-    echo "## Instructions"
+    echo "## Current Spec (partial — needs completion)"
     echo ""
-    echo "Write a complete spec for: **$feature**"
+    cat "$spec_file"
     echo ""
-    echo "Fill in every section of the template above."
-    echo "Be specific in Acceptance Criteria — each must be testable."
-    echo "Define Approved Fixtures BEFORE any agent writes tests."
+    echo "---"
     echo ""
-    echo "Output the filled spec to: $spec_file"
+    echo "## Your Instructions"
+    echo ""
+    echo "Complete the spec above. Specific rules:"
+    echo ""
+    echo "**User Stories**"
+    echo "- Write 2-4 user stories based on the users and goal described"
+    echo "- Format: \"As a [user type], I want [action] so that [benefit]\""
+    echo "- Do not invent user types beyond what was described"
+    echo ""
+    echo "**Acceptance Criteria**"
+    echo "- Write 3-6 criteria — each must be specific and testable"
+    echo "- Bad: \"The system works correctly\""
+    echo "- Good: \"Email is delivered within 5 seconds of the event\""
+    echo "- Each criterion must be verifiable by a test or a validator agent"
+    echo ""
+    echo "**Approved Fixtures**"
+    echo "- Leave the Approved Fixtures section EMPTY with a note: '[Human must fill this]'"
+    echo "- Do NOT invent expected outputs — that is the human's job"
+    echo "- The human defines what 'correct' looks like before any test is written"
+    echo ""
+    echo "**Out of Scope**"
+    echo "- Do not add items to Out of Scope beyond what the human stated"
+    echo "- If you think something should be excluded, add it as a question at the end"
+    echo ""
+    echo "**Format**"
+    echo "- Output the complete, filled spec in Markdown"
+    echo "- Preserve all section headers exactly as in the template"
+    echo "- Save the result to: \`$spec_file\`"
+    echo ""
+    echo "At the end, list any open questions you have for the human before implementation starts."
 
   } > "$context_file"
 
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
   echo -e "  ${BOLD}Next steps:${RESET}"
   echo ""
-  echo "  1. Copy the context below and paste into your AI agent:"
+  echo "  1. Fill in the Approved Fixtures section in the spec:"
+  echo "     $spec_file"
+  echo ""
+  echo "  2. Then paste this context into your AI agent to complete the spec:"
   echo ""
   echo "     cat $context_file"
   echo ""
-  echo "  2. Paste the agent's spec output into: $spec_file"
+  echo -e "  ${DIM}The agent will write User Stories and Acceptance Criteria${RESET}"
+  echo -e "  ${DIM}based on your answers. Approved Fixtures are yours to define.${RESET}"
   echo ""
 }
 
@@ -1612,8 +2786,10 @@ cmd_help() {
   echo "  rig-spec <command> [options]"
   echo ""
   echo -e "${BOLD}Setup:${RESET}"
-  echo "  init                 Initialize .rig/ in current project"
-  echo "  init --retrofit      Initialize for existing project (rules as [DRAFT])"
+  echo "  init                       Initialize .rig/ in current project"
+  echo "  init --retrofit            Initialize for existing project (rules as [DRAFT])"
+  echo "  init --template <name>     Force a specific stack template"
+  echo "                             Templates: node-api, python-api, fullstack-nextjs, generic"
   echo ""
   echo -e "${BOLD}Workflow:${RESET}"
   echo "  status               Show current project state"
