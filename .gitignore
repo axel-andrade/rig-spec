@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────
+# rig-spec — .gitignore
+# ─────────────────────────────────────────────
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output (CLI — Phase 4)
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Package managers
+.npm
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+.vim/
+*.orig
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temp
+tmp/
+temp/
+.tmp/
+*.tmp
+
+# Project-specific
+references/
+.claude/
+
+# ─────────────────────────────────────────────
+# NOTE: .rig/ is intentionally NOT ignored.
+#
+# In projects using rig-spec, the .rig/ folder
+# should be committed alongside the code.
+# It is the harness — it belongs in version control.
+# ─────────────────────────────────────────────
