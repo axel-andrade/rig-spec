@@ -126,6 +126,98 @@ detect_sensors() {
   fi
 }
 
+# Scans an existing project's src/ structure to inform retrofit rule generation.
+# Sets RETROFIT_SRC_TREE, RETROFIT_HAS_TS, RETROFIT_TEST_PATTERN, RETROFIT_MODULES.
+scan_retrofit_structure() {
+  RETROFIT_SRC_TREE=""
+  RETROFIT_HAS_TS=false
+  RETROFIT_TEST_PATTERN="unknown"
+  RETROFIT_MODULES=()
+
+  # Directories to always exclude — covers Node, Python, Go, Rust, Ruby, PHP, Java, etc.
+  local PRUNE_DIRS=(
+    node_modules    # Node.js
+    .venv venv env  # Python virtualenvs
+    __pycache__     # Python bytecode
+    target          # Rust / Java / Maven
+    vendor          # Go / PHP / Ruby
+    build dist out  # generic build outputs
+    .gradle         # Gradle (Android / JVM)
+    .rig            # rig-spec itself
+    ".git"          # git internals
+  )
+
+  # Build the -path exclusion flags for find
+  build_prune_args() {
+    local args=()
+    for d in "${PRUNE_DIRS[@]}"; do
+      args+=("!" "-path" "*/${d}/*")
+    done
+    echo "${args[@]}"
+  }
+
+  local prune_args
+  read -ra prune_args <<< "$(build_prune_args)"
+
+  # Detect TypeScript presence
+  if find . -name "*.ts" ! -name "*.d.ts" "${prune_args[@]}" 2>/dev/null | grep -q .; then
+    RETROFIT_HAS_TS=true
+    print_ok "TypeScript detected"
+  fi
+
+  # Build a grep pattern for pruned dirs (for pipe-based filtering)
+  local prune_grep
+  prune_grep=$(IFS='|'; echo "${PRUNE_DIRS[*]}" | sed 's/ /|/g')
+
+  # Detect test location pattern
+  if find . \( -name "*.test.*" -o -name "*.spec.*" \) "${prune_args[@]}" 2>/dev/null | \
+       grep -qE "src/"; then
+    RETROFIT_TEST_PATTERN="co-located"
+  elif find . \( -name "*.test.*" -o -name "*.spec.*" \) "${prune_args[@]}" 2>/dev/null | \
+       grep -qE "/test/|/__tests__/|/tests/|/spec/"; then
+    RETROFIT_TEST_PATTERN="separate-folder"
+  fi
+  if [ "$RETROFIT_TEST_PATTERN" != "unknown" ]; then
+    print_ok "Test pattern detected: $RETROFIT_TEST_PATTERN"
+  fi
+
+  # Scan source tree (max 2 levels deep)
+  local src_dir=""
+  for candidate in src app lib internal pkg cmd; do
+    if [ -d "$candidate" ]; then
+      src_dir="$candidate"
+      break
+    fi
+  done
+
+  if [ -n "$src_dir" ]; then
+    # Build a readable tree (2 levels)
+    RETROFIT_SRC_TREE=$(find "$src_dir" -maxdepth 2 -type d \
+      "${prune_args[@]}" 2>/dev/null | sort | \
+      while IFS= read -r dir; do
+        local depth
+        depth=$(echo "$dir" | tr -cd '/' | wc -c)
+        local indent=""
+        for ((i=0; i<depth; i++)); do indent+="  "; done
+        echo "${indent}$(basename "$dir")/"
+      done)
+
+    # Detect module names (first-level subdirs of src/)
+    while IFS= read -r moddir; do
+      local modname
+      modname=$(basename "$moddir")
+      RETROFIT_MODULES+=("$modname")
+    done < <(find "$src_dir" -maxdepth 1 -mindepth 1 -type d \
+      "${prune_args[@]}" 2>/dev/null | sort)
+
+    if [ -n "$RETROFIT_SRC_TREE" ]; then
+      print_ok "Source structure scanned: $src_dir/ (${#RETROFIT_MODULES[@]} modules detected)"
+    fi
+  else
+    print_warn "No src/app/lib directory found — structure rules will be generic"
+  fi
+}
+
 # Refines stack detection using free-text description keywords.
 # Only overrides if the file-based detection found nothing.
 refine_stack_from_description() {
@@ -183,6 +275,23 @@ write_harness_md() {
 **Name:** $project_name
 **Stack:** $STACK_LABEL
 **Description:** ${PROJECT_DESCRIPTION:-[Add a one-paragraph description of this project]}
+
+---
+
+## Vision
+
+${PROJECT_DESCRIPTION:-[Describe the product vision in 2-4 sentences: what it is, who it serves, what core problem it solves. This is the north star — every feature must serve this vision.]}
+
+---
+
+## Business Rules
+
+> Core domain rules the agent must know before implementing anything.
+> These are non-negotiable constraints — not implementation details.
+
+- [Rule 1 — e.g., "A patient record may only be accessed by its assigned practitioner"]
+- [Rule 2 — e.g., "Medication doses must be validated against patient weight before saving"]
+- [Add rules specific to your domain]
 
 ---
 
@@ -293,7 +402,7 @@ write_bootstrap_md() {
 
 ### 1. Project Overview
 → Read `.rig/HARNESS.md`
-What it answers: What is this project? What level? What's active?
+What it answers: What is this project? Vision? Business rules? What level? What's active?
 
 ### 2. Current State
 → Read `.rig/memory/progress.md`
@@ -1659,10 +1768,192 @@ EOF
 # Topology Dispatchers
 # ─────────────────────────────────────────────
 
+write_rules_retrofit() {
+  local ext="ts"
+  $RETROFIT_HAS_TS || ext="js"
+
+  # structure.rules.md — filled from real scan
+  local tree_content="[No src/ directory found — fill in your actual folder layout]"
+  local placement_content="- [file type] must live in: [path]"
+  if [ -n "$RETROFIT_SRC_TREE" ]; then
+    tree_content="$RETROFIT_SRC_TREE"
+    if [ ${#RETROFIT_MODULES[@]} -gt 0 ]; then
+      placement_content=""
+      for mod in "${RETROFIT_MODULES[@]}"; do
+        placement_content+="- \`${mod}/\` — [describe what lives here]"$'\n'
+      done
+    fi
+  fi
+
+  cat > "$RIG_DIR/feedforward/rules/structure.rules.md" << EOF
+# Structure Rules — Scanned from project
+
+> Auto-generated by rig-spec retrofit. Verify and complete.
+
+---
+
+## Detected Folder Layout
+
+\`\`\`
+$tree_content
+\`\`\`
+
+## Placement Rules
+
+$placement_content
+---
+
+## Sensor
+
+Enforced by: \`feedback/sensors/structure.sensor.md\` (Level 3)
+EOF
+
+  # architecture.rules.md — [DRAFT] but stack-aware
+  local layer_hint="Controllers → Services → Repositories → Database"
+  [ "$STACK" = "python" ] && layer_hint="Routers → Services → Repositories → Database"
+
+  cat > "$RIG_DIR/feedforward/rules/architecture.rules.md" << EOF
+# Architecture Rules — [DRAFT]
+
+> Auto-generated by rig-spec retrofit. Fill in your actual patterns.
+
+---
+
+## Layer Hierarchy
+
+\`\`\`
+$layer_hint
+\`\`\`
+
+## Module Boundaries
+
+$(for mod in "${RETROFIT_MODULES[@]}"; do echo "- \`$mod/\` — [describe what it can/cannot import]"; done)
+$([ ${#RETROFIT_MODULES[@]} -eq 0 ] && echo "- [module-a] may NOT import from [module-b]")
+
+## Forbidden Patterns
+
+- [e.g., Direct database access from a controller]
+- [e.g., Business logic inside a route handler]
+
+---
+
+## Sensor
+
+Enforced by: \`feedback/sensors/arch.sensor.md\` (Level 3)
+EOF
+
+  # naming.rules.md — TS vs JS aware [DRAFT]
+  local type_note=""
+  $RETROFIT_HAS_TS && type_note="(TypeScript detected — strict typing expected)"
+
+  cat > "$RIG_DIR/feedforward/rules/naming.rules.md" << EOF
+# Naming Rules — [DRAFT] $type_note
+
+> Auto-generated by rig-spec retrofit. Fill in your actual conventions.
+
+---
+
+## Files
+
+- [file type]: \`[pattern].$ext\`
+
+## Classes
+
+- [type]: \`[PascalCase + suffix rule]\`
+
+## Functions / Methods
+
+- [type]: \`[camelCase + prefix rule]\`
+
+## Variables / Constants
+
+- camelCase for variables
+- SCREAMING_SNAKE_CASE for module-level constants
+
+---
+
+## Sensor
+
+Enforced by: \`feedback/sensors/naming.sensor.md\` (Level 3)
+EOF
+
+  # api.rules.md — [DRAFT] with detected stack hint
+  cat > "$RIG_DIR/feedforward/rules/api.rules.md" << 'APIEOF'
+# API Rules — [DRAFT]
+
+> Auto-generated by rig-spec retrofit. Fill in your actual API conventions.
+
+---
+
+## Response Envelope
+
+```json
+{ "data": {}, "error": null }
+```
+
+## Error Format
+
+```json
+{ "data": null, "error": { "code": "ERROR_CODE", "message": "..." } }
+```
+
+## Endpoint Conventions
+
+- List:   `GET    /[resource]`
+- Single: `GET    /[resource]/:id`
+- Create: `POST   /[resource]`
+- Update: `PUT    /[resource]/:id`
+- Delete: `DELETE /[resource]/:id`
+
+---
+
+## Sensor
+
+Enforced by: `feedback/sensors/standards-compliance.sensor.md` (Level 3)
+APIEOF
+
+  # testing.rules.md — test pattern aware [DRAFT]
+  local test_loc_note="[Fill in where tests live in this project]"
+  if [ "$RETROFIT_TEST_PATTERN" = "co-located" ]; then
+    test_loc_note="Tests appear to be co-located next to source files (e.g., \`[name].spec.$ext\`)"
+  elif [ "$RETROFIT_TEST_PATTERN" = "separate-folder" ]; then
+    test_loc_note="Tests appear to live in a separate \`test/\` or \`__tests__/\` folder"
+  fi
+
+  cat > "$RIG_DIR/feedforward/rules/testing.rules.md" << EOF
+# Testing Rules — [DRAFT]
+
+> Auto-generated by rig-spec retrofit. Fill in your actual testing conventions.
+
+---
+
+## Test Location
+
+$test_loc_note
+
+## Coverage Requirements
+
+- [Module]: minimum [X]%
+
+## Rules
+
+- Do NOT mock the database in integration tests
+- Test names must describe behavior, not implementation
+- Approved Fixtures Policy: expected outputs are defined by humans in the spec BEFORE agents write tests
+
+---
+
+## Sensor
+
+Enforced by: \`feedback/sensors/test.sensor.md\` (Level 3)
+EOF
+
+  print_ok "feedforward/rules/ generated from project scan (structure filled, others [DRAFT])"
+}
+
 write_topology_rules() {
-  # Retrofit always writes generic [DRAFT] stubs — never overwrite existing patterns
   if [ "$RETROFIT" = true ]; then
-    write_rules_templates
+    write_rules_retrofit
     return
   fi
   case "$STACK" in
@@ -1674,9 +1965,21 @@ write_topology_rules() {
 }
 
 write_topology_skills() {
-  # Retrofit skips skill generation — existing project may already have conventions
   if [ "$RETROFIT" = true ]; then
-    write_skill_template
+    # Write skills based on detected technologies (stack-agnostic knowledge, always valid)
+    case "$STACK" in
+      node|nestjs|express) write_skills_node ;;
+      python)              write_skills_python ;;
+      nextjs)              write_skills_nextjs ;;
+      *)
+        # Even without stack: if TS detected, write TS + node skills
+        if $RETROFIT_HAS_TS; then
+          write_skills_node
+        else
+          write_skill_template
+        fi
+        ;;
+    esac
     return
   fi
   case "$STACK" in
@@ -2491,7 +2794,11 @@ cmd_init() {
   fi
 
   # Free-text description
-  echo -e "  ${DIM}Describe your project in one sentence (Enter to skip):${RESET}"
+  echo -e "  ${BOLD}What does your project do?${RESET}"
+  echo -e "  ${DIM}Run this command to give your .rig full context about the project:${RESET}"
+  echo -e "  ${DIM}describe what it is, who it serves, and what core problem it solves.${RESET}"
+  echo -e "  ${DIM}This seeds HARNESS.md Vision and Business Rules. Press Enter to skip.${RESET}"
+  echo ""
   read -r -p "  → " PROJECT_DESCRIPTION
   echo ""
 
@@ -2510,6 +2817,10 @@ cmd_init() {
     print_ok "Template override: $STACK_LABEL"
   fi
   detect_sensors
+  if [ "$RETROFIT" = true ]; then
+    print_step "Scanning project structure..."
+    scan_retrofit_structure
+  fi
   echo ""
 
   print_step "Creating .rig/ structure..."
@@ -2561,7 +2872,9 @@ EOF
   echo -e "  ${BOLD}Project:${RESET} $(basename "$(pwd)")"
   echo -e "  ${BOLD}Stack:${RESET} $STACK_LABEL"
   if [ "$RETROFIT" = true ]; then
-    echo -e "  ${BOLD}Mode:${RESET} retrofit (rules as [DRAFT] — fill in your existing patterns)"
+    local scan_info="structure scanned"
+    [ -n "$RETROFIT_SRC_TREE" ] && scan_info="structure scanned (${#RETROFIT_MODULES[@]} modules)"
+    echo -e "  ${BOLD}Mode:${RESET} retrofit ($scan_info — architecture/naming rules as [DRAFT])"
   else
     echo -e "  ${BOLD}Template:${RESET} $( [ "$STACK" = "unknown" ] && echo "generic" || echo "$STACK (rules + skills pre-filled)" )"
   fi
@@ -2588,7 +2901,8 @@ EOF
     echo "     rig-spec shape \"feature name\""
   fi
   echo ""
-  echo "  Check status anytime: rig-spec status"
+  echo "  Fill in vision and rules: rig-spec overview"
+  echo "  Check status anytime:    rig-spec status"
   echo ""
 }
 
@@ -3141,6 +3455,84 @@ EOF
 }
 
 # ─────────────────────────────────────────────
+# cmd_overview
+# ─────────────────────────────────────────────
+
+cmd_overview() {
+  require_rig
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec overview${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+
+  local harness="$RIG_DIR/HARNESS.md"
+  local progress="$RIG_DIR/memory/progress.md"
+
+  if [ ! -f "$harness" ]; then
+    print_err "HARNESS.md not found."; echo ""; exit 1
+  fi
+
+  echo ""
+
+  # ── Project block ──────────────────────────
+  echo -e "${BOLD}Project${RESET}"
+  awk '/^## Project/{p=1; next} p && /^---/{exit} p && NF{print "  " $0}' "$harness"
+  echo ""
+
+  # ── Vision block ──────────────────────────
+  if grep -q "^## Vision" "$harness"; then
+    echo -e "${BOLD}Vision${RESET}"
+    awk '/^## Vision/{p=1; next} p && /^---/{exit} p && NF{print "  " $0}' "$harness"
+    echo ""
+  fi
+
+  # ── Business Rules block ──────────────────
+  if grep -q "^## Business Rules" "$harness"; then
+    echo -e "${BOLD}Business Rules${RESET}"
+    awk '/^## Business Rules/{p=1; next} p && /^---/{exit} p && /^>/{next} p && NF{print "  " $0}' "$harness"
+    echo ""
+  fi
+
+  # ── Current Focus ─────────────────────────
+  if grep -q "^## Current Focus" "$harness"; then
+    echo -e "${BOLD}Current Focus${RESET}"
+    awk '/^## Current Focus/{p=1; next} p && /^---/{exit} p && NF{print "  " $0}' "$harness"
+    echo ""
+  fi
+
+  # ── Sensors / Level ───────────────────────
+  local level
+  level=$(grep "^\*\*Active Level:" "$harness" 2>/dev/null | sed 's/\*\*Active Level: *\([0-9]\).*/\1/')
+  local sensor_count=0
+  if [ -d "$RIG_DIR/feedback/sensors" ]; then
+    sensor_count=$(find "$RIG_DIR/feedback/sensors" -name "*.sensor.md" ! -name "_TEMPLATE*" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  local spec_count=0
+  if [ -d "$RIG_DIR/feedforward/specs" ]; then
+    spec_count=$(find "$RIG_DIR/feedforward/specs" -name "*.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+
+  echo -e "${BOLD}Harness State${RESET}"
+  [ -n "$level" ] && echo -e "  Level: $level"
+  echo -e "  Specs: $spec_count"
+  echo -e "  Sensors: $sensor_count"
+  echo ""
+
+  # ── Last session summary ──────────────────
+  if [ -f "$progress" ] && grep -q "^## Last Session" "$progress"; then
+    echo -e "${BOLD}Last Session${RESET}"
+    awk '/^## Last Session/{p=1; next} p && /^---/{exit} p && NF{print "  " $0}' "$progress"
+    echo ""
+  fi
+
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+  echo -e "  ${DIM}Edit vision and rules: $harness${RESET}"
+  echo -e "  ${DIM}Create a spec: rig-spec shape \"feature name\"${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
 # cmd_shape
 # ─────────────────────────────────────────────
 
@@ -3485,12 +3877,13 @@ cmd_help() {
   echo ""
   echo -e "${BOLD}Setup:${RESET}"
   echo "  init                       Initialize .rig/ in current project"
-  echo "  init --retrofit            Initialize for existing project (rules as [DRAFT])"
+  echo "  init --retrofit            Initialize for existing project (scans src/, rules as [DRAFT])"
   echo "  init --template <name>     Force a specific stack template"
   echo "                             Templates: node-api, python-api, fullstack-nextjs, generic"
   echo ""
   echo -e "${BOLD}Workflow:${RESET}"
-  echo "  status               Show current project state"
+  echo "  overview             Show project vision, business rules, and current state"
+  echo "  status               Show current project state (specs, tasks, sensors)"
   echo "  resume               Print full context for the next agent session"
   echo "  run <task-id>        Assemble task context for your AI agent"
   echo "  validate             Run all configured sensors"
@@ -3519,6 +3912,7 @@ main() {
 
   case "$cmd" in
     init)         cmd_init "$@" ;;
+    overview)     cmd_overview ;;
     status)       cmd_status ;;
     resume)       cmd_resume ;;
     validate)     cmd_validate "$@" ;;

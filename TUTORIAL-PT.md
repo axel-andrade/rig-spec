@@ -46,14 +46,15 @@ rig-spec version
 O rig-spec segue sempre a mesma sequência:
 
 ```
-init → shape → plan → run → validate
+init → overview → shape → plan → run → validate
 ```
 
 1. **init** — configura o `.rig/` no projeto
-2. **shape** — cria a especificação da feature
-3. **plan** — divide a spec em tasks
-4. **run** — monta o contexto para o agente executar cada task
-5. **validate** — roda os sensores para verificar se passou
+2. **overview** — preenche visão e regras de negócio no HARNESS.md
+3. **shape** — cria a especificação da feature
+4. **plan** — divide a spec em tasks
+5. **run** — monta o contexto para o agente executar cada task
+6. **validate** — roda os sensores para verificar se passou
 
 ---
 
@@ -69,7 +70,7 @@ rig-spec init
 ```
 
 O comando vai:
-- Perguntar uma descrição do projeto (1 frase)
+- Perguntar o que o projeto faz (alimenta as seções Vision e Business Rules do HARNESS.md)
 - Detectar a linguagem/framework automaticamente (Node, Python, Next.js...)
 - Criar a pasta `.rig/` com todos os arquivos necessários
 - Criar os arquivos de entrada para o seu agente (CLAUDE.md, AGENTS.md, .cursorrules...)
@@ -91,7 +92,12 @@ O comando vai:
 rig-spec init --retrofit
 ```
 
-Isso gera as regras como rascunho `[DRAFT]` para você preencher com os padrões que já existem no projeto.
+O retrofit escaneia o projeto real em vez de criar stubs genéricos:
+- Lê `src/`, `app/` ou `lib/` (2 níveis) e gera `structure.rules.md` com a **árvore real** do projeto
+- Detecta TypeScript (arquivos `.ts`) e ajusta as regras de naming
+- Detecta onde ficam os testes (co-localizados ou pasta separada)
+- Lista os módulos encontrados em `architecture.rules.md`
+- Regras de arquitetura, naming, API e testes ficam como `[DRAFT]` para você completar
 
 **Quer forçar um template específico?**
 
@@ -104,7 +110,25 @@ rig-spec init --template generic
 
 ---
 
-### 2. Ver o que foi criado
+### 2. Definir visão e regras de negócio
+
+```bash
+rig-spec overview
+```
+
+Exibe o `.rig/HARNESS.md` em formato limpo: **Project → Vision → Business Rules → Current Focus → Last Session**.
+
+**Abra `.rig/HARNESS.md`** e preencha:
+- `## Vision` — o que o produto faz, para quem e qual problema resolve. É o norte do agente.
+- `## Business Rules` — regras de domínio não-negociáveis que o agente deve conhecer antes de qualquer implementação.
+  - Exemplo: *"Um prontuário só pode ser acessado pelo médico responsável"*
+  - Exemplo: *"Doses de medicação devem ser validadas contra o peso do paciente antes de salvar"*
+
+Essas seções foram pré-preenchidas com o que você descreveu no `init`. Revise e expanda.
+
+---
+
+### 3. Ver o que foi criado
 
 Depois do init, sua pasta `.rig/` vai ter essa estrutura:
 
@@ -136,11 +160,9 @@ Depois do init, sua pasta `.rig/` vai ter essa estrutura:
     └── antigravity.md          ← dicas para o Antigravity
 ```
 
-**Abra `.rig/HARNESS.md`** e confirme que as informações do projeto estão corretas. Esse é o arquivo mais importante — todo agente começa por ele.
-
 ---
 
-### 3. Criar uma spec
+### 4. Criar uma spec
 
 Uma spec é um documento que define o que vai ser construído antes de qualquer código ser escrito.
 
@@ -192,7 +214,7 @@ O agente vai completar as User Stories e os Critérios de Aceite com base nas su
 
 ---
 
-### 4. Dividir em tasks
+### 5. Dividir em tasks
 
 Com a spec pronta, quebre em tasks menores:
 
@@ -211,7 +233,7 @@ Cada task vai ter:
 
 ---
 
-### 5. Executar uma task
+### 6. Executar uma task
 
 ```bash
 rig-spec run task-01
@@ -237,7 +259,7 @@ O agente lê tudo, implementa o que está no contrato e assina cada item.
 
 ---
 
-### 6. Validar
+### 7. Validar
 
 Depois que o agente terminou:
 
@@ -259,7 +281,7 @@ O agente recebe a lista de falhas específicas e corrige. Você roda `rig-spec v
 
 ---
 
-### 7. Retomar uma sessão
+### 8. Retomar uma sessão
 
 Abriu o computador no dia seguinte e não lembra onde parou?
 
@@ -271,7 +293,7 @@ Imprime o contexto completo: projeto, o que foi feito, o que está pendente, pr�
 
 ---
 
-### 8. Verificar o status
+### 9. Verificar o status
 
 ```bash
 rig-spec status
@@ -281,7 +303,7 @@ Mostra: feature ativa, tasks concluídas, sensores configurados, última sessão
 
 ---
 
-### 9. Auditoria de drift
+### 10. Auditoria de drift
 
 Com o tempo, o código pode se desviar dos padrões do projeto — não em uma mudança, mas aos poucos. Rode periodicamente:
 
@@ -534,35 +556,40 @@ source ~/.bashrc
 # 2. Entrar no projeto e inicializar
 cd meu-projeto
 rig-spec init
-# → descreva o projeto, aguarde detecção de stack
+# → descreva o projeto (alimenta Vision e Business Rules), aguarde detecção de stack
 
-# 3. Criar a spec
+# 3. Revisar visão e regras de negócio
+rig-spec overview
+# → abre visão do produto e regras de domínio para confirmar/expandir
+# → edite .rig/HARNESS.md: seções Vision e Business Rules
+
+# 4. Criar a spec
 rig-spec shape "cadastro de usuários"
 # → responda as 5 perguntas
 # → preencha os Approved Fixtures na spec gerada
 
-# 4. Dividir em tasks
+# 5. Dividir em tasks
 rig-spec plan cadastro-de-usuarios
 # → cole o contexto no agente → ele cria as tasks
 
-# 5. Executar task 01
+# 6. Executar task 01
 rig-spec run task-01
 # → cole o contexto no agente → ele implementa
 
-# 6. Validar
+# 7. Validar
 rig-spec validate task-01
 # → todos os sensores passaram? próxima task
 # → algum falhou? agente corrige → valida de novo
 
-# 7. Próxima task
+# 8. Próxima task
 rig-spec run task-02
 rig-spec validate task-02
 
-# 8. Nova sessão (amanhã)
+# 9. Nova sessão (amanhã)
 rig-spec resume
 # → cole no agente → contexto completo reconstruído → continue
 
-# 9. Ver progresso
+# 10. Ver progresso
 rig-spec status
 ```
 
@@ -580,7 +607,7 @@ Com qualquer um. Claude, Gemini, ChatGPT, Cursor, Windsurf, Antigravity. Tudo é
 Sim. O `.rig/` é o harness do projeto — faz parte do repositório. Os únicos arquivos ignorados são os `context-*.md` (temporários), que já estão no `.rig/.gitignore`.
 
 **Posso usar em projeto existente?**
-Sim. Use `rig-spec init --retrofit`. As regras são geradas como `[DRAFT]` para você preencher com os padrões que já existem no projeto.
+Sim. Use `rig-spec init --retrofit`. O comando varre o `src/` real do projeto e gera `structure.rules.md` com a estrutura de pastas encontrada. Arquitetura, naming, API e testes ficam como `[DRAFT]` para você completar com os padrões existentes.
 
 **O agente pode alterar os Approved Fixtures?**
 Não. Os fixtures são definidos pelo humano antes dos testes serem escritos. O agente é instruído explicitamente a não tocá-los. Se um teste falha, o código é corrigido — nunca o fixture.
@@ -595,8 +622,9 @@ Tudo bem. O Caminho 1 (agente único, você valida) funciona perfeitamente. Os p
 | Comando | O que faz |
 |---|---|
 | `rig-spec init` | Inicializa `.rig/` detectando stack automaticamente |
-| `rig-spec init --retrofit` | Modo projeto existente (regras como [DRAFT]) |
+| `rig-spec init --retrofit` | Modo projeto existente — escaneia `src/`, gera structure.rules real, demais como [DRAFT] |
 | `rig-spec init --template <nome>` | Força template: `node-api`, `python-api`, `fullstack-nextjs`, `generic` |
+| `rig-spec overview` | Exibe visão do produto, regras de negócio e estado atual em tela limpa |
 | `rig-spec shape "feature"` | Faz 5 perguntas, cria spec, monta contexto para o agente completar |
 | `rig-spec plan <spec>` | Monta contexto para o agente criar as tasks |
 | `rig-spec run <task-id>` | Monta contexto completo para o agente implementar |

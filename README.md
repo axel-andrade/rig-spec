@@ -44,7 +44,7 @@ rig-spec init
 
 ```
 .rig/
-├── HARNESS.md          ← what every agent reads first
+├── HARNESS.md          ← vision, business rules, current focus — every agent reads this first
 ├── feedforward/        ← guides the agent before it acts
 │   ├── specs/          ← what to build
 │   ├── tasks/          ← how to divide the work
@@ -85,13 +85,14 @@ rig-spec/
 ## The Development Flow
 
 ```
-init → research → shape → plan → run → validate → audit
+init → overview → research → shape → plan → run → validate → audit
 ```
 
 ```bash
 rig-spec init                          # new project — auto-detects stack
-rig-spec init --retrofit               # existing project (rules as [DRAFT])
+rig-spec init --retrofit               # existing project — scans src/ structure
 rig-spec init --template node-api      # force a specific template
+rig-spec overview                      # show vision, business rules, current state
 rig-spec research "topic"              # investigate before specifying
 rig-spec shape "feature name"          # ask 5 questions, pre-fill spec
 rig-spec plan feature-name             # break spec into tasks
@@ -121,12 +122,16 @@ cd your-project
 rig-spec init
 ```
 
-**Step 2 — Fill in `HARNESS.md`**
+**Step 2 — Fill in vision and business rules**
 
-Open `.rig/HARNESS.md` and add:
-- What your project is (1 paragraph)
-- Your tech stack
-- Harness level: start with `1`
+```bash
+rig-spec overview
+```
+
+Shows the generated `.rig/HARNESS.md` in a clean one-pager. Open the file and fill in:
+- `## Vision` — what the product is, who it serves, what core problem it solves
+- `## Business Rules` — non-negotiable domain constraints agents must know before coding
+- `## Current Focus` — which feature is active
 
 **Step 3 — Create your first spec**
 
@@ -227,6 +232,9 @@ Every implementation is validated by a separate agent with a separate mission. T
 ### Explicit Contracts
 Every task has a contract — a checklist of what "done" means, agreed before any code is written. The validator checks item by item.
 
+### Vision and Business Rules in HARNESS.md
+`HARNESS.md` now carries the product vision and non-negotiable domain rules. Every agent reads them before touching any task — eliminating implementations that work technically but violate business logic.
+
 ### Session Memory
 `progress.md`, `decisions.md`, and `bootstrap.md` ensure that every new session starts with full context — no wasted tokens figuring out where you left off.
 
@@ -251,6 +259,16 @@ From "One Shot Hero" to "Continuous Drift" — every documented way AI agents fa
 | `fullstack-nextjs` | `package.json` + `"next"` dependency | App Router arch, React naming, component rules, API routes | Next.js, React |
 | `python-api` | `pyproject.toml` / `requirements.txt` | layered arch, snake_case naming, FastAPI, pytest | FastAPI, Python |
 | `generic` | (fallback) | blank stubs | skill template |
+
+**Retrofit mode** (`--retrofit`) behaves differently — it doesn't apply a template. Instead, it scans the actual project:
+
+- Reads `src/`, `app/`, or `lib/` (2 levels deep) → generates `structure.rules.md` from the real folder tree
+- Detects TypeScript files → adjusts naming rules
+- Detects test location pattern (co-located vs. separate folder)
+- Detects module names and lists them in `architecture.rules.md`
+- Writes architecture/naming/API/testing rules as `[DRAFT]` for you to fill in
+
+This means `structure.rules.md` is populated immediately — you just confirm it. The other rule files need manual completion.
 
 Override auto-detection when needed:
 

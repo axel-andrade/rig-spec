@@ -141,7 +141,8 @@ The single file any agent reads first when entering the project.
 ```
 
 It contains:
-- What the project is (1 paragraph)
+- **Vision** — what the product is, who it serves, what core problem it solves
+- **Business Rules** — non-negotiable domain constraints (the agent must know these before coding)
 - Current harness level active (1, 2, or 3)
 - Current active feature or task
 - Where to find specs, tasks, and progress
@@ -150,6 +151,8 @@ It contains:
 
 **This file is the bridge between your project and the harness.**
 Any agent, in any session, reads this first.
+
+Run `rig-spec overview` to inspect it in a clean one-pager without opening the file.
 
 ---
 
@@ -465,12 +468,19 @@ Run `rig-spec init` and choose your starting level. The harness is set up before
 
 ### Retrofit (existing project)
 Run `rig-spec init --retrofit`. The CLI:
-1. Scans the project for existing sensors (linters, test scripts, CI config)
-2. Discovers the tech stack (package.json, requirements.txt, go.mod, etc.)
-3. Generates a contextual `HARNESS.md` based on what it finds
-4. Reports which sensors are already available and which are suggested
-5. Starts at Level 1 — you upgrade when ready
+1. Asks what the project does — pre-fills `HARNESS.md` Vision and Business Rules
+2. Scans the project for existing sensors (linters, test scripts, CI config)
+3. Discovers the tech stack (`package.json`, `requirements.txt`, `go.mod`, etc.)
+4. **Scans `src/`, `app/`, or `lib/` (2 levels)** — generates `structure.rules.md` from the real folder tree
+5. Detects TypeScript presence — adjusts naming rules accordingly
+6. Detects test location pattern (co-located vs. separate folder)
+7. Lists detected module names in `architecture.rules.md`
+8. Writes architecture, naming, API, and testing rules as `[DRAFT]` — you fill them in
+9. Generates `HARNESS.md` with Vision and Business Rules pre-seeded
+10. Starts at Level 1 — you upgrade when ready
 
 **Retrofit always starts at Level 1. Upgrade incrementally.**
 
-The harness is most needed in existing projects and hardest to build there — retrofit mode is designed to minimize that friction.
+The key difference from greenfield: `structure.rules.md` is populated from reality on day one, not from a template. The agent immediately knows your actual folder layout.
+
+Run `rig-spec overview` after init to review and complete the Vision and Business Rules.

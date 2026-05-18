@@ -10,7 +10,7 @@
 The `rig-spec` workflow follows a clear sequence:
 
 ```
-init → research → shape → plan → run → validate → audit
+init → overview → research → shape → plan → run → validate → audit
 ```
 
 Each step has a specific purpose, a clear input, and a defined output. Nothing moves forward without completing the previous step.
@@ -28,17 +28,17 @@ Each step has a specific purpose, a clear input, and a defined output. Nothing m
 # New project
 rig-spec init
 
-# Existing project
+# Existing project — scans src/ and infers structure
 rig-spec init --retrofit
 ```
 
 **What happens:**
-1. Creates the `.rig/` folder structure
-2. Scans the project for existing sensors (linters, test scripts, CI configs)
-3. Detects the tech stack (package.json, go.mod, requirements.txt, etc.)
-4. Generates a `HARNESS.md` based on what it finds
-5. Reports discovered sensors and suggests missing ones
-6. Asks which harness level to start at (1, 2, or 3)
+1. Asks what the project does — seeds `HARNESS.md` Vision and Business Rules
+2. Creates the `.rig/` folder structure
+3. Scans the project for existing sensors (linters, test scripts, CI configs)
+4. Detects the tech stack (`package.json`, `go.mod`, `requirements.txt`, etc.)
+5. Generates a `HARNESS.md` with `## Vision` and `## Business Rules` pre-filled
+6. In `--retrofit` mode: scans `src/` tree, detects TypeScript, detects test pattern, generates `structure.rules.md` from real folder layout
 
 **Output:**
 ```
@@ -62,7 +62,46 @@ rig-spec init --retrofit
 
 ---
 
-### Step 2 — `research` (optional but recommended)
+### Step 2 — `overview`
+
+**Purpose:** Review and complete the project's vision and business rules before any work starts.
+
+**Command:**
+```bash
+rig-spec overview
+```
+
+**What it shows:**
+- **Project** — name, stack, description
+- **Vision** — the product north star (auto-seeded from init, review and expand)
+- **Business Rules** — non-negotiable domain constraints
+- **Current Focus** — active feature and next task
+- **Last Session** — what happened and what's next
+
+**After running:**
+Open `.rig/HARNESS.md` and complete:
+
+```markdown
+## Vision
+[What the product is, who it serves, what core problem it solves.]
+
+## Business Rules
+- [Rule 1 — domain constraint the agent must never violate]
+- [Rule 2 — ...]
+```
+
+Business rules are domain knowledge, not implementation details. Examples:
+- "A patient record may only be accessed by its assigned practitioner"
+- "Medication doses must be validated against patient weight before saving"
+- "An invoice cannot be deleted after it has been sent"
+
+These rules are injected into every `run` context — agents know them before writing any code.
+
+**Why this step exists:** Agents that don't know the domain rules will produce technically correct code that violates business logic. Vision gives direction. Business rules set hard constraints.
+
+---
+
+### Step 3 — `research` (optional but recommended)
 
 **Purpose:** Investigate before specifying. Saves findings in a clean, reusable file.
 
@@ -94,7 +133,7 @@ Implement → read spec + tasks + research findings (clean context)
 
 ---
 
-### Step 3 — `shape`
+### Step 4 — `shape`
 
 **Purpose:** Create a spec for a feature or piece of work.
 
@@ -153,7 +192,7 @@ Deliver real-time and async notifications across email and in-app channels.
 
 ---
 
-### Step 4 — `plan`
+### Step 5 — `plan`
 
 **Purpose:** Break the spec into ordered, executable tasks.
 
@@ -224,7 +263,7 @@ Create the `notifications` table with all required fields.
 
 ---
 
-### Step 5 — `run`
+### Step 6 — `run`
 
 **Purpose:** Execute a task with a fully assembled context.
 
@@ -251,7 +290,7 @@ rig-spec run task-01
 
 ---
 
-### Step 6 — `validate`
+### Step 7 — `validate`
 
 **Purpose:** Verify the implementation against the contract and sensors.
 
@@ -342,7 +381,7 @@ run → validate FAILED
 
 ---
 
-### Step 7 — `audit` (scheduled, outside change cycle)
+### Step 8 — `audit` (scheduled, outside change cycle)
 
 **Purpose:** Detect drift that accumulates between tasks — not visible in any single change.
 
@@ -404,7 +443,11 @@ This triggers the bootstrap sequence:
 ```bash
 # Set up harness on existing project
 rig-spec init --retrofit
-# → .rig/ created, sensors discovered, HARNESS.md generated
+# → .rig/ created, src/ scanned, HARNESS.md generated with Vision + Business Rules
+
+# Review and complete vision + business rules
+rig-spec overview
+# → open .rig/HARNESS.md → fill in Vision and Business Rules
 
 # Research before specifying
 rig-spec research "notification patterns in this codebase"
@@ -460,8 +503,9 @@ Installs the `rig-spec` command to `~/.local/bin/`. No runtime required. Works o
 | Command | Description |
 |---|---|
 | `rig-spec init` | Initialize harness — auto-detects stack and applies matching template |
-| `rig-spec init --retrofit` | Initialize for existing project (rules as [DRAFT], no skills overwrite) |
+| `rig-spec init --retrofit` | Initialize for existing project — scans `src/` structure, rules as [DRAFT] |
 | `rig-spec init --template <name>` | Force a specific template: `node-api`, `python-api`, `fullstack-nextjs`, `generic` |
+| `rig-spec overview` | Show project vision, business rules, and current state in one screen |
 | `rig-spec status` | Show progress across all active specs |
 | `rig-spec resume` | Print full context for the next agent session |
 | `rig-spec validate` | Run all sensors in `feedback/sensors/` |
