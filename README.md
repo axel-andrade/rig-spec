@@ -160,6 +160,58 @@ Opens the assembled context. Paste it into Claude, Gemini, GPT, or any other age
 
 ---
 
+## How to Use With Your AI Agent
+
+`rig-spec` works with any AI tool. How you use it depends on the tool.
+
+### File-reading agents (Claude Code, Cursor, Windsurf)
+
+`rig-spec init` creates entry point files the tool reads automatically:
+
+```
+CLAUDE.md       ← Claude Code reads this on every session
+.cursorrules    ← Cursor reads this automatically
+.windsurfrules  ← Windsurf reads this automatically
+AGENTS.md       ← generic (any agent that supports it)
+```
+
+All of them contain the same instruction: read `.rig/HARNESS.md` first.
+
+**Usage:** open the project normally. The agent already has context. To start a task:
+
+```bash
+rig-spec run task-01        # assembles context into .rig/context-task-01.md
+```
+
+Then tell the agent:
+```
+Read .rig/context-task-01.md and implement what the contract specifies.
+```
+
+### Chat agents (Claude.ai, ChatGPT, Gemini)
+
+Chat tools can't read your local files — you copy the context and paste it into the conversation.
+
+```bash
+rig-spec run task-01        # generates .rig/context-task-01.md
+cat .rig/context-task-01.md # copy this entire output
+```
+
+Paste it as the first message. The agent reads, implements, and replies with code. You copy the code back to your files.
+
+### Quick reference — what each command generates
+
+| Command | Output | When to use |
+|---|---|---|
+| `rig-spec run task-01` | `.rig/context-task-01.md` | Implement a task |
+| `rig-spec shape "feature"` | `.rig/context-shape-[slug].md` | Write a spec |
+| `rig-spec plan feature` | `.rig/context-plan-[slug].md` | Break a spec into tasks |
+| `rig-spec resume` | prints directly | Resume where you left off |
+
+`context-*.md` files are temporary and already in `.rig/.gitignore`.
+
+---
+
 ## How to Work
 
 Every feature goes through the same sequence — what changes is *who* runs each step.

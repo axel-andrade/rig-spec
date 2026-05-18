@@ -315,6 +315,111 @@ Gera um relatório em `.rig/feedback/audit/report-YYYY-MM-DD.md` com: código mo
 
 ---
 
+## Como usar com o seu agente de IA
+
+O rig-spec funciona com qualquer ferramenta de IA — mas a forma de usá-lo muda dependendo da ferramenta. Existem dois modos:
+
+---
+
+### Modo 1 — Agentes que leem arquivos (Claude Code, Cursor, Windsurf)
+
+Essas ferramentas leem o projeto diretamente. O `rig-spec init` já criou os arquivos de entrada:
+
+```
+CLAUDE.md         ← Claude Code lê isso automaticamente
+.cursorrules      ← Cursor lê isso automaticamente
+.windsurfrules    ← Windsurf lê isso automaticamente
+AGENTS.md         ← genérico para qualquer agente que suporte
+```
+
+Todos esses arquivos contêm a mesma instrução:
+
+```
+Read .rig/HARNESS.md and .rig/memory/bootstrap.md at the start of every session.
+```
+
+**Como usar:**
+
+Você não precisa colar nada. Só abra o projeto e comece a conversar. O agente lê o HARNESS.md automaticamente e já sabe o contexto.
+
+Para uma task específica, rode no terminal:
+
+```bash
+rig-spec run task-01
+```
+
+Isso gera `.rig/context-task-01.md`. Diga ao agente:
+
+```
+Read .rig/context-task-01.md and implement what the contract specifies.
+```
+
+O agente lê o arquivo, implementa e assina o contrato. Depois:
+
+```bash
+rig-spec validate task-01
+```
+
+---
+
+### Modo 2 — Chats (Claude.ai, ChatGPT, Gemini, qualquer chat)
+
+Ferramentas de chat não leem seus arquivos locais. Você precisa copiar o contexto e colar na conversa.
+
+**Para implementar uma task:**
+
+```bash
+rig-spec run task-01
+cat .rig/context-task-01.md
+```
+
+Copie o output inteiro e cole como primeira mensagem no chat. O agente lê, implementa e responde com o código. Você copia o código de volta para os arquivos.
+
+**Para retomar uma sessão:**
+
+```bash
+rig-spec resume
+```
+
+Copie o output e cole no chat. O agente reconstruiu o contexto completo sem gastar tokens explorando o projeto.
+
+**Para criar uma spec:**
+
+```bash
+rig-spec shape "nome da feature"
+cat .rig/context-shape-nome-da-feature.md
+```
+
+Cole no chat. O agente completa User Stories e Critérios de Aceite.
+
+---
+
+### Comparação rápida
+
+| Ferramenta | Modo | O que fazer |
+|---|---|---|
+| Claude Code (CLI/IDE) | Lê arquivos | Abra o projeto. Diga `read .rig/context-task-01.md` |
+| Cursor | Lê arquivos | Abra o projeto. `.cursorrules` já configura o contexto |
+| Windsurf | Lê arquivos | Abra o projeto. `.windsurfrules` já configura o contexto |
+| Claude.ai (chat) | Cola contexto | `rig-spec run task-01` → copie o output → cole no chat |
+| ChatGPT (chat) | Cola contexto | `rig-spec run task-01` → copie o output → cole no chat |
+| Gemini (chat) | Cola contexto | `rig-spec run task-01` → copie o output → cole no chat |
+
+---
+
+### O que cada comando gera para colar
+
+| Comando | Arquivo gerado | Quando usar |
+|---|---|---|
+| `rig-spec run task-01` | `.rig/context-task-01.md` | Para implementar uma task |
+| `rig-spec shape "feature"` | `.rig/context-shape-[slug].md` | Para criar uma spec |
+| `rig-spec plan feature` | `.rig/context-plan-[slug].md` | Para criar tasks a partir de uma spec |
+| `rig-spec resume` | (imprime direto) | Para retomar onde parou |
+
+Os arquivos `context-*.md` são temporários e estão no `.rig/.gitignore` — não vão para o repositório.
+
+---
+
 ## Os dois caminhos de trabalho
 
 ### Caminho 1 — Você orquestra (mais simples)
