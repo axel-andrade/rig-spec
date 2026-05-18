@@ -2197,17 +2197,22 @@ Claude Code's built-in memory (`.claude/`) stores user preferences. `.rig/memory
 
 ## Recommended Permissions
 
-For this project, allow Claude Code to run the sensors defined in `feedback/sensors/` without prompting. Add them to `.claude/settings.local.json`:
+Allow Claude Code to run the sensors defined in `feedback/sensors/` without prompting.
+Open `.claude/settings.local.json` and add a `Bash(...)` entry for each command in your sensor files.
+
+Example (adjust to match your actual sensor commands):
 
 ```json
 {
   "allowedTools": [
-    "Bash(npx eslint*)",
-    "Bash(npx tsc*)",
-    "Bash(npm test*)"
+    "Bash([your-lint-command]*)",
+    "Bash([your-typecheck-command]*)",
+    "Bash([your-test-command]*)"
   ]
 }
 ```
+
+See `.rig/feedback/sensors/` for the exact commands to allowlist.
 
 ## Two-Agent Pattern
 
@@ -2585,22 +2590,31 @@ write_audit_templates() {
 ## Command
 
 ```bash
-# Node.js / TypeScript
-npx knip
+# Fill in the command for your stack:
 
-# Alternative
-npx ts-prune
+# Node.js / TypeScript
+# npx knip
+# npx ts-prune
+
+# Python
+# vulture src/
+
+# Go
+# go build ./... (unused imports are compile errors)
+
+# Rust
+# cargo check 2>&1 | grep "unused"
 ```
 
 ## What It Detects
 
-- Exported functions/classes never imported elsewhere
-- Files never referenced
+- Exported functions/classes/symbols never referenced elsewhere
+- Files never imported
 - Variables declared but never used
 
 ## Pass Condition
 
-Zero unused exports in `src/`. Exceptions documented below.
+Zero unused exports in the source tree. Exceptions documented below.
 
 ## Known Exceptions
 
@@ -2624,14 +2638,27 @@ EOF
 ## Commands
 
 ```bash
-# Vulnerabilities
-npm audit
+# Fill in the commands for your stack:
 
-# Outdated packages
-npm outdated
+# Node.js
+# npm audit                  # vulnerabilities
+# npm outdated               # outdated packages
+# npx depcheck               # unused/missing deps
 
-# Unused/missing dependencies
-npx depcheck
+# Python
+# pip-audit                  # vulnerabilities (pip install pip-audit)
+# pip list --outdated        # outdated packages
+
+# Go
+# govulncheck ./...          # vulnerabilities (go install golang.org/x/vuln/cmd/govulncheck@latest)
+
+# Rust
+# cargo audit                # vulnerabilities (cargo install cargo-audit)
+# cargo outdated             # outdated crates (cargo install cargo-outdated)
+
+# PHP (Composer)
+# composer audit             # vulnerabilities
+# composer outdated          # outdated packages
 ```
 
 ## Pass Condition
@@ -2644,7 +2671,7 @@ npx depcheck
 
 1. Vulnerabilities: update immediately and test
 2. Outdated: create an upgrade task for the next sprint
-3. Unused/missing: clean up package.json
+3. Unused: clean up your dependency manifest
 EOF
 
   cat > "$RIG_DIR/feedback/audit/drift-report.audit.md" << 'EOF'
@@ -2676,11 +2703,19 @@ EOF
 ## Commands
 
 ```bash
-# Architecture drift (adjust config path as needed)
-npx depcruise src/ --config .dependency-cruiser.json
+# Fill in the commands for your stack:
+
+# Architecture drift
+# Node.js: npx depcruise src/ --config .dependency-cruiser.json
+# Python:  pydeps [package] --max-bacon 4
+# Go:      go vet ./...
+# Java:    mvn dependency:analyze
 
 # Coverage drift
-npm test -- --coverage
+# Node.js: npm test -- --coverage
+# Python:  pytest --cov=src --cov-report=term
+# Go:      go test ./... -cover
+# Rust:    cargo tarpaulin
 ```
 
 ## Report Format
