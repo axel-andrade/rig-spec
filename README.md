@@ -386,7 +386,6 @@ The inferential sensor catches what linters cannot: wrong layer for business log
 | [VISION.md](VISION.md) | What rig-spec is, why it exists, the 13 failure patterns it solves |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layer structure, skills system, MCP integration, harness levels |
 | [WORKFLOW.md](WORKFLOW.md) | Complete development flow, two-agent pattern, CLI reference |
-| [ROADMAP.md](ROADMAP.md) | Build phases, decision log, explicit non-goals |
 
 ---
 
