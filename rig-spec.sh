@@ -2023,6 +2023,79 @@ patch_harness_skills() {
   ' "$harness" > "$tmp" && mv "$tmp" "$harness"
 }
 
+# Updates HARNESS.md "Active Feature" and "Next Task" fields.
+patch_harness_focus() {
+  local harness="$RIG_DIR/HARNESS.md"
+  [ ! -f "$harness" ] && return
+  local feature="$1"
+  local next_task="${2:-none}"
+  local tmp
+  tmp=$(mktemp)
+  sed \
+    "s|^\*\*Active Feature:\*\*.*|\*\*Active Feature:\*\* $feature|" \
+    "$harness" | \
+  sed \
+    "s|^\*\*Next Task:\*\*.*|\*\*Next Task:\*\* $next_task|" \
+  > "$tmp" && mv "$tmp" "$harness"
+}
+
+# Adds a new feature to progress.md Active Features block.
+# No-op if the feature is already listed.
+patch_progress_add_feature() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+  local feature="$1"
+  local spec_file="$2"
+
+  # Already listed?
+  grep -q "\*\*$feature\*\*" "$progress" 2>/dev/null && return
+
+  local tmp
+  tmp=$(mktemp)
+  awk -v feature="$feature" -v spec="$spec_file" -v date="$(today)" '
+    /^_No features in progress yet\._/ {
+      print "**" feature "**"
+      print ""
+      print "- Spec: `" spec "`"
+      print "- Status: spec created — tasks not yet planned"
+      print "- Started: " date
+      next
+    }
+    { print }
+  ' "$progress" > "$tmp" && mv "$tmp" "$progress"
+}
+
+# Updates progress.md Last Session block with today's summary.
+patch_progress_last_session() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+  local what_happened="$1"
+  local whats_next="${2:-—}"
+
+  local tmp
+  tmp=$(mktemp)
+  awk -v date="$(today)" -v happened="$what_happened" -v nextstep="$whats_next" '
+    /^\*\*Date:\*\*/ { print "**Date:** " date; next }
+    /^\*\*What happened:\*\*/ { print "**What happened:** " happened; next }
+    /^\*\*What'\''s next:\*\*/ { print "**What'\''s next:** " nextstep; next }
+    /^\*\*Blockers:\*\*/ { print "**Blockers:** None."; next }
+    { print }
+  ' "$progress" > "$tmp" && mv "$tmp" "$progress"
+}
+
+# Marks a task as complete in progress.md (moves to Completed, updates Last Session).
+patch_progress_task_done() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+  local task_id="$1"
+  local feature="$2"
+
+  local tmp
+  tmp=$(mktemp)
+  # Replace pending task line with done marker if it exists
+  sed "s|- \[ \] \(.*${task_id}.*\)|- [x] \1|g" "$progress" > "$tmp" && mv "$tmp" "$progress"
+}
+
 write_sensor_templates() {
   for sensor in "${SENSORS[@]}"; do
     case "$sensor" in
@@ -3151,9 +3224,21 @@ cmd_validate() {
   echo ""
   if [ "$failed" -eq 0 ]; then
     echo -e "  ${GREEN}${BOLD}All sensors passed${RESET} ($passed/$((passed+failed)))"
-    if [ -n "$task_id" ] && [ -n "$task_file" ]; then
+
+    # Auto-update progress.md Last Session
+    local session_summary="All sensors passed ($passed sensors)."
+    local next_step="Run: rig-spec done $task_id"
+    [ -z "$task_id" ] && next_step="Mark tasks complete with: rig-spec done <task-id>"
+    patch_progress_last_session "$session_summary" "$next_step"
+
+    echo ""
+    if [ -n "$task_id" ]; then
+      echo -e "  ${DIM}progress.md Last Session updated.${RESET}"
       echo ""
-      echo -e "  ${DIM}Sensors passed. Review contract items above and mark them in the task file.${RESET}"
+      read -r -p "  Mark $task_id as done? [Y/n] " _resp
+      if [[ ! "$_resp" =~ ^[Nn]$ ]]; then
+        cmd_done "$task_id"
+      fi
     fi
   else
     echo -e "  ${RED}${BOLD}$failed sensor(s) failed${RESET}: ${errors[*]}"
@@ -3485,7 +3570,87 @@ EOF
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "  2. Paste the agent's output into: $research_file"
+  echo -e "  ${BOLD}2. After the agent responds:${RESET}"
+  echo "     Copy the agent's output and save it to:"
+  echo "     $research_file"
+  echo ""
+  echo -e "  ${DIM}(Claude Code / Cursor: the agent will write the file directly)${RESET}"
+  echo -e "  ${DIM}(Chat / Gemini / ChatGPT: copy the response and paste into the file)${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_done
+# ─────────────────────────────────────────────
+
+cmd_done() {
+  require_rig
+  local task_id="$1"
+
+  if [ -z "$task_id" ]; then
+    echo ""
+    print_err "Usage: rig-spec done <task-id>"
+    echo ""
+    echo "  Example: rig-spec done task-01"
+    echo ""
+    exit 1
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec done — $task_id${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  local progress="$RIG_DIR/memory/progress.md"
+  local harness="$RIG_DIR/HARNESS.md"
+
+  # Find which feature/spec this task belongs to
+  local task_file
+  task_file=$(find "$RIG_DIR/feedforward/tasks" -name "*${task_id}*.md" ! -name "_TEMPLATE*" 2>/dev/null | head -1)
+  local feature=""
+  if [ -n "$task_file" ]; then
+    feature=$(basename "$(dirname "$task_file")")
+    print_ok "Task found: $task_file"
+  else
+    print_warn "Task file not found for '$task_id' — updating progress without task reference"
+  fi
+
+  # Find next pending task in same feature
+  local next_task="none"
+  if [ -n "$feature" ]; then
+    local task_dir="$RIG_DIR/feedforward/tasks/$feature"
+    next_task=$(find "$task_dir" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort | \
+      while IFS= read -r f; do
+        local base
+        base=$(basename "$f" .task.md)
+        # Return the first task that sorts after the current one
+        [[ "$base" > "$task_id" ]] && { echo "$base"; break; }
+      done)
+    [ -z "$next_task" ] && next_task="none — all tasks complete"
+  fi
+
+  # Update progress.md
+  patch_progress_task_done "$task_id" "$feature"
+  patch_progress_last_session \
+    "Completed and marked $task_id as done." \
+    "${next_task:-none}"
+  print_ok "progress.md updated"
+
+  # Update HARNESS.md next task
+  if [ -n "$feature" ]; then
+    patch_harness_focus "$feature" "$next_task"
+    print_ok "HARNESS.md Next Task updated → $next_task"
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}Task marked complete:${RESET} $task_id"
+  if [ "$next_task" != "none" ] && [ "$next_task" != "none — all tasks complete" ]; then
+    echo -e "  ${BOLD}Next task:${RESET} $next_task"
+    echo ""
+    echo "  Run: rig-spec run $next_task"
+  else
+    echo -e "  ${GREEN}All tasks in '$feature' are complete.${RESET}"
+  fi
   echo ""
 }
 
@@ -3704,6 +3869,14 @@ $design_content
 EOF
 
   print_ok "Spec created: $spec_file"
+
+  # Auto-update HARNESS.md and progress.md
+  patch_harness_focus "$slug" "none — run rig-spec plan $slug"
+  patch_progress_add_feature "$feature" "feedforward/specs/${slug}.spec.md"
+  patch_progress_last_session \
+    "Spec created for '$feature' via rig-spec shape." \
+    "Complete Approved Fixtures in $spec_file, then run: rig-spec plan $slug"
+  print_ok "HARNESS.md and progress.md updated"
   echo ""
 
   # ── Assemble agent context ─────────────────
@@ -3790,10 +3963,16 @@ EOF
     echo "- Do not add items to Out of Scope beyond what the human stated"
     echo "- If you think something should be excluded, add it as a question at the end"
     echo ""
-    echo "**Format**"
-    echo "- Output the complete, filled spec in Markdown"
+    echo "**Output format — required**"
+    echo "- Output the complete spec using this exact structure:"
+    echo ""
+    echo "  ## File: $spec_file"
+    echo "  \`\`\`markdown"
+    echo "  [full spec content here]"
+    echo "  \`\`\`"
+    echo ""
     echo "- Preserve all section headers exactly as in the template"
-    echo "- Save the result to: \`$spec_file\`"
+    echo "- Do NOT output anything after the closing code block except open questions"
     echo ""
     echo "At the end, list any open questions you have for the human before implementation starts."
 
@@ -3806,12 +3985,83 @@ EOF
   echo "  1. Fill in the Approved Fixtures section in the spec:"
   echo "     $spec_file"
   echo ""
-  echo "  2. Then paste this context into your AI agent to complete the spec:"
+  echo "  2. Paste this context into your AI agent:"
   echo ""
   echo "     cat $context_file"
   echo ""
-  echo -e "  ${DIM}The agent will write User Stories and Acceptance Criteria${RESET}"
-  echo -e "  ${DIM}based on your answers. Approved Fixtures are yours to define.${RESET}"
+  echo -e "  ${BOLD}3. After the agent responds:${RESET}"
+  echo "     Copy the spec content from the agent's response"
+  echo "     and save it to:"
+  echo "     $spec_file"
+  echo ""
+  echo -e "  ${DIM}(Claude Code / Cursor: the agent will create the file directly)${RESET}"
+  echo -e "  ${DIM}(Chat / Gemini / ChatGPT: copy the output and save manually)${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# run_sensor_smoketest
+# Verifies that sensor commands are executable.
+# Called after plan to catch misconfigured sensors before any implementation.
+# ─────────────────────────────────────────────
+
+run_sensor_smoketest() {
+  local sensors_dir="$RIG_DIR/feedback/sensors"
+  local sensor_files
+  sensor_files=$(find "$sensors_dir" -name "*.sensor.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
+
+  echo ""
+  echo -e "${BOLD}${CYAN}Sensor smoke test${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo -e "  ${DIM}Verifying sensor commands are correctly configured before implementation starts.${RESET}"
+  echo ""
+
+  if [ -z "$sensor_files" ]; then
+    print_warn "No sensors found in $sensors_dir"
+    echo ""
+    echo -e "  ${DIM}Add sensor files from the agent response above, then run:${RESET}"
+    echo -e "  ${DIM}  rig-spec validate${RESET}"
+    echo ""
+    return 0
+  fi
+
+  local ok=0
+  local bad=0
+  local bad_sensors=()
+
+  while IFS= read -r sensor_file; do
+    local sensor_name
+    sensor_name=$(basename "$sensor_file" .sensor.md)
+    local cmd
+    cmd=$(extract_command "$sensor_file")
+
+    if [ -z "$cmd" ]; then
+      echo -e "  ${YELLOW}SKIP${RESET}  $sensor_name — no ## Command block found"
+      continue
+    fi
+
+    # Check the first token of the command exists in PATH
+    local binary
+    binary=$(echo "$cmd" | awk '{print $1}')
+    if ! command -v "$binary" &>/dev/null 2>&1; then
+      echo -e "  ${RED}ERR ${RESET}  ${BOLD}$sensor_name${RESET} — command not found: $binary"
+      ((bad++)) || true
+      bad_sensors+=("$sensor_name")
+    else
+      echo -e "  ${GREEN}OK  ${RESET}  ${BOLD}$sensor_name${RESET} — $binary found"
+      ((ok++)) || true
+    fi
+  done <<< "$sensor_files"
+
+  echo ""
+  if [ "$bad" -eq 0 ]; then
+    echo -e "  ${GREEN}${BOLD}$ok sensor(s) ready.${RESET} Run ${BOLD}rig-spec validate${RESET} after each task."
+  else
+    echo -e "  ${RED}${BOLD}$bad sensor(s) misconfigured:${RESET} ${bad_sensors[*]}"
+    echo ""
+    echo "  Fix the ## Command in each sensor file before running tasks."
+    echo "  Sensor files are in: $sensors_dir/"
+  fi
   echo ""
 }
 
@@ -3879,8 +4129,44 @@ cmd_plan() {
     echo "- Identify what can run in parallel vs. sequentially"
     echo "- Each task must reference which spec it comes from"
     echo ""
-    echo "Output one file per task to: $tasks_dir/"
+    echo "Output format — required:"
+    echo "Output each task file AND its sensors using this exact structure:"
+    echo ""
+    echo "  ## File: $tasks_dir/task-01-[name].task.md"
+    echo "  \`\`\`markdown"
+    echo "  [full task content here]"
+    echo "  \`\`\`"
+    echo ""
+    echo "  ## File: $tasks_dir/task-02-[name].task.md"
+    echo "  \`\`\`markdown"
+    echo "  [full task content here]"
+    echo "  \`\`\`"
+    echo ""
     echo "File naming: task-01-[name].task.md, task-02-[name].task.md, ..."
+    echo ""
+    echo "Sensor files — mandatory:"
+    echo "For every contract item that says '← verified by: [sensor]', output the sensor file:"
+    echo ""
+    echo "  ## File: $RIG_DIR/feedback/sensors/[sensor-name].sensor.md"
+    echo "  \`\`\`markdown"
+    echo "  # Sensor: [Name]"
+    echo "  **Type:** Computational"
+    echo "  **Timing:** After every task"
+    echo ""
+    echo "  ## Command"
+    echo "  \`\`\`"
+    echo "  [exact command to run — e.g. npx tsc --noEmit, npm test, npx eslint src/]"
+    echo "  \`\`\`"
+    echo ""
+    echo "  ## Pass condition"
+    echo "  Exit code 0."
+    echo ""
+    echo "  ## On failure"
+    echo "  Fix the implementation before marking the task done."
+    echo "  \`\`\`"
+    echo ""
+    echo "If a sensor file already exists in $RIG_DIR/feedback/sensors/, skip it."
+    echo "Do not output anything outside these blocks except a brief summary at the end."
     echo ""
   } > "$context_file"
 
@@ -3890,12 +4176,22 @@ cmd_plan() {
   echo ""
   echo -e "  ${BOLD}Next steps:${RESET}"
   echo ""
-  echo "  1. Copy the context and paste into your AI agent:"
+  echo "  1. Paste this context into your AI agent:"
   echo ""
   echo "     cat $context_file"
   echo ""
-  echo "  2. Save each task file the agent generates to: $tasks_dir/"
+  echo -e "  ${BOLD}2. After the agent responds:${RESET}"
+  echo "     For each '## File: [path]' block in the response:"
+  echo "     copy the content and save it to that path."
   echo ""
+  echo "     Task files go to: $tasks_dir/"
+  echo "     Sensor files go to: $RIG_DIR/feedback/sensors/"
+  echo ""
+  echo -e "  ${DIM}(Claude Code / Cursor: the agent will create the files directly)${RESET}"
+  echo -e "  ${DIM}(Chat / Gemini / ChatGPT: copy each block and save manually)${RESET}"
+  echo ""
+  echo -e "  ${DIM}──────────────────────────────────────${RESET}"
+  run_sensor_smoketest
 }
 
 # ─────────────────────────────────────────────
@@ -3922,6 +4218,7 @@ cmd_help() {
   echo "  resume               Print full context for the next agent session"
   echo "  run <task-id>        Assemble task context for your AI agent"
   echo "  validate             Run all configured sensors"
+  echo "  done <task-id>       Mark a task complete — updates progress.md and HARNESS.md"
   echo "  audit                Run continuous drift sensors"
   echo ""
   echo -e "${BOLD}Spec-driven:${RESET}"
@@ -3951,6 +4248,7 @@ main() {
     status)       cmd_status ;;
     resume)       cmd_resume ;;
     validate)     cmd_validate "$@" ;;
+    done)         cmd_done "$@" ;;
     audit)        cmd_audit ;;
     run)          cmd_run "$@" ;;
     research)     cmd_research "$@" ;;

@@ -364,16 +364,68 @@ rig-spec validate task-01
 
 ### Modo 2 — Chats (Claude.ai, ChatGPT, Gemini, qualquer chat)
 
-Ferramentas de chat não leem seus arquivos locais. Você precisa copiar o contexto e colar na conversa.
+Ferramentas de chat não leem seus arquivos locais — elas não conseguem criar ou editar arquivos no seu computador. **Tudo que o agente "salva" existe só na conversa.** Você precisa copiar o output de volta para os arquivos manualmente.
 
-**Para implementar uma task:**
+---
+
+**Para criar uma spec (`shape`):**
+
+```bash
+rig-spec shape "nome da feature"
+cat .rig/context-shape-nome-da-feature.md
+```
+
+Cole no chat. O agente vai responder com um bloco assim:
+
+```
+## File: .rig/feedforward/specs/nome-da-feature.spec.md
+```markdown
+# Spec: nome da feature
+...conteúdo completo...
+```
+```
+
+Você copia esse conteúdo e salva no arquivo mostrado.
+
+---
+
+**Para criar tasks (`plan`):**
+
+```bash
+rig-spec plan nome-da-feature
+cat .rig/context-plan-nome-da-feature.md
+```
+
+Cole no chat. O agente vai responder com um bloco por task:
+
+```
+## File: .rig/feedforward/tasks/nome-da-feature/task-01-xxx.task.md
+```markdown
+# Task 01 — ...
+...conteúdo completo...
+```
+
+## File: .rig/feedforward/tasks/nome-da-feature/task-02-xxx.task.md
+```markdown
+# Task 02 — ...
+...
+```
+```
+
+Crie cada arquivo no caminho mostrado e cole o conteúdo.
+
+---
+
+**Para implementar uma task (`run`):**
 
 ```bash
 rig-spec run task-01
 cat .rig/context-task-01.md
 ```
 
-Copie o output inteiro e cole como primeira mensagem no chat. O agente lê, implementa e responde com o código. Você copia o código de volta para os arquivos.
+Cole no chat. O agente implementa e responde com o código. Você copia cada arquivo para o seu projeto.
+
+---
 
 **Para retomar uma sessão:**
 
@@ -381,16 +433,7 @@ Copie o output inteiro e cole como primeira mensagem no chat. O agente lê, impl
 rig-spec resume
 ```
 
-Copie o output e cole no chat. O agente reconstruiu o contexto completo sem gastar tokens explorando o projeto.
-
-**Para criar uma spec:**
-
-```bash
-rig-spec shape "nome da feature"
-cat .rig/context-shape-nome-da-feature.md
-```
-
-Cole no chat. O agente completa User Stories e Critérios de Aceite.
+Copie o output e cole no chat. O agente reconstrói o contexto completo.
 
 ---
 
