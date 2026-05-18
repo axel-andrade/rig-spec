@@ -354,9 +354,24 @@ Você pode criar skills para qualquer tecnologia ou domínio específico do seu 
 
 ## Sensores
 
-Sensores são verificações automáticas que rodam com `rig-spec validate`.
+Sensores são verificações automáticas que rodam com `rig-spec validate`. Cada arquivo `*.sensor.md` dentro de `.rig/feedback/sensors/` é detectado automaticamente — não há registro manual.
 
-**Detectados automaticamente no init:**
+---
+
+### Os dois tipos de sensor
+
+| Tipo | Como funciona | Quando usar |
+|---|---|---|
+| **Computacional** | Roda um comando shell. Passa se exit code = 0. | Linter, type checker, test runner, cobertura |
+| **Inferencial** | O agente lê o código + spec e emite um veredicto. | Conformidade semântica, padrões subjetivos |
+
+A maioria dos seus sensores será computacional. Sensores inferenciais são para o que ferramentas não conseguem checar automaticamente.
+
+---
+
+### O que já vem pronto
+
+**Criados automaticamente pelo `rig-spec init`** (quando a ferramenta é detectada):
 
 | Ferramenta encontrada | Sensor criado |
 |---|---|
@@ -367,14 +382,145 @@ Sensores são verificações automáticas que rodam com `rig-spec validate`.
 | mypy | `typecheck.sensor.md` |
 | pytest | `test.sensor.md` |
 
-**Precisam de configuração manual** (templates prontos em `feedback/sensors/`):
+**Templates prontos, precisam de configuração manual** (em `feedback/sensors/`):
 
-- `arch.sensor.md` — verifica limites de módulos
-- `naming.sensor.md` — verifica convenções de nomenclatura
-- `spec-compliance.sensor.md` — agente verifica se o código bate com a spec
-- `standards-compliance.sensor.md` — agente verifica se segue as rules/
+| Arquivo | O que verifica |
+|---|---|
+| `arch.sensor.md` | Limites de módulos (ex: controller não importa repository diretamente) |
+| `naming.sensor.md` | Convenções de nomenclatura de arquivos e classes |
+| `spec-compliance.sensor.md` | Agente verifica se o código implementa o que a spec define |
+| `standards-compliance.sensor.md` | Agente verifica se o código segue as `rules/` |
 
-Para adicionar qualquer sensor: copie `_TEMPLATE.sensor.md`, preencha o bloco `## Command` e o `rig-spec validate` o detecta automaticamente.
+---
+
+### Como criar um sensor novo
+
+**Passo 1 — Copie o template:**
+
+```bash
+cp .rig/feedback/sensors/_TEMPLATE.sensor.md .rig/feedback/sensors/coverage.sensor.md
+```
+
+**Passo 2 — Preencha os campos obrigatórios:**
+
+```markdown
+# Sensor: Cobertura de Testes
+
+**Type:** Computational
+**Timing:** After every task
+
+## Command
+```bash
+npm test -- --coverage --coverageThreshold='{"global":{"lines":80}}'
+```
+
+## Pass condition
+Exit code 0. Cobertura de linhas ≥ 80% em todos os módulos.
+
+## On failure
+Escreva testes para os caminhos não cobertos. Não reduza o threshold.
+```
+
+**Passo 3 — Pronto.** O sensor é detectado automaticamente no próximo `rig-spec validate`.
+
+---
+
+### Fluxo para decidir o que sensorisar
+
+```
+Existe ferramenta que checa isso automaticamente?
+│
+├── SIM → Sensor computacional
+│         Exemplo: eslint, tsc, pytest, npm test, depcruise
+│
+└── NÃO → Só humano ou IA consegue julgar?
+          │
+          ├── IA consegue → Sensor inferencial
+          │                 Exemplo: "o código segue o padrão da spec?"
+          │
+          └── Só humano  → Checklist no contrato da task (não sensor)
+```
+
+---
+
+### Exemplos reais de sensores computacionais
+
+**Cobertura mínima (Node.js):**
+```markdown
+## Command
+```bash
+npm test -- --coverage --coverageThreshold='{"global":{"lines":80}}'
+```
+## Pass condition
+Exit code 0.
+```
+
+**Limites de arquitetura (depcruise):**
+```markdown
+## Command
+```bash
+npx depcruise src/ --config .dependency-cruiser.json
+```
+## Pass condition
+Exit code 0. Zero violações de boundary.
+```
+
+**Cobertura mínima (Python):**
+```markdown
+## Command
+```bash
+pytest --cov=src --cov-fail-under=80
+```
+## Pass condition
+Exit code 0.
+```
+
+**Build sem erros (Next.js):**
+```markdown
+## Command
+```bash
+npm run build
+```
+## Pass condition
+Exit code 0. Zero erros de build.
+```
+
+---
+
+### Exemplo de sensor inferencial
+
+Sensores inferenciais não têm `## Command` com shell — o agente é o verificador:
+
+```markdown
+# Sensor: Conformidade com a Spec
+
+**Type:** Inferential
+**Timing:** After every task
+
+## O que verificar
+
+Leia `.rig/feedforward/specs/[feature].spec.md` e o código implementado.
+Para cada User Story e Critério de Aceite, confirme se o código os satisfaz.
+
+## Pass condition
+
+Todos os critérios de aceite têm implementação correspondente.
+Os Approved Fixtures produzem o output esperado.
+
+## On failure
+
+Liste os critérios não atendidos. O implementador corrige antes de assinar o contrato.
+```
+
+---
+
+### Dicas
+
+- **Nomeie com propósito:** `lint.sensor.md`, `typecheck.sensor.md`, `coverage.sensor.md` — o nome aparece no output do validate.
+- **Um sensor, uma responsabilidade.** Não junte lint + typecheck em um único sensor — falhas ficam ambíguas.
+- **Timing importa.** Sensores lentos (integração, build completo) podem ser marcados como `After integration` para não travar o ciclo de tasks rápidas.
+- **Threshold explícito.** Sempre coloque o número mínimo aceitável no `## Pass condition`. "Testes passando" é vago; "≥ 80% de cobertura de linhas" é verificável.
+- **On failure claro.** O agente lê esse campo quando o sensor falha. Diga exatamente o que ele deve fazer — e o que ele **não** deve fazer (ex: "não reduza o threshold", "não use `--no-verify`").
 
 ---
 
