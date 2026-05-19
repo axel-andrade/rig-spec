@@ -288,6 +288,15 @@ rig-spec run task-01
 
 **Why assembling context matters:** Without full context, the agent improvises. With assembled context, it has everything it needs in one clean window — fewer tokens, better results, no guessing.
 
+**If the agent cannot finish in one session (Continuation Protocol):**
+
+If the agent's context fills up or the task is larger than expected, it should:
+1. Write a `[CHECKPOINT]` to `memory/progress.md` describing exactly where it stopped and what remains
+2. Leave unfinished contract items unchecked
+3. Signal: `CHECKPOINT SAVED — run rig-spec resume to continue in a clean context`
+
+Then run `rig-spec resume` — the next agent starts with a clean context window and reads the checkpoint to know exactly where to pick up.
+
 ---
 
 ### Step 7 — `validate`
@@ -364,7 +373,8 @@ Contract: notification-system / task-01
 #### Phase D — Decision
 
 ```
-ALL PASSED → progress.md updated → ready for next task
+ALL PASSED → implementer writes discoveries to memory/learnings.md
+           → progress.md updated → ready for next task
 ANY FAILED → implementer receives specific failures → retry
 ```
 
@@ -419,18 +429,21 @@ This triggers the bootstrap sequence:
    → understand the project
 
 2. Read .rig/memory/progress.md
-   → know what's done and what's next
+   → know what's done and what's next (including any [CHECKPOINT] markers)
 
 3. Read .rig/memory/decisions.md
    → remember why things are the way they are
 
-4. Read .rig/memory/research/ (relevant files)
+4. Read .rig/memory/learnings.md
+   → recall implementation discoveries and gotchas from previous tasks
+
+5. Read .rig/memory/research/ (relevant files)
    → recall prior research findings
 
-5. Read the active spec
+6. Read the active spec
    → understand the current feature context
 
-6. Read the next pending task
+7. Read the next pending task
    → know exactly what to work on
 ```
 

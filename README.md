@@ -58,6 +58,7 @@ rig-spec init
 ├── memory/             ← persists state between sessions
 │   ├── progress.md     ← what's done, what's next
 │   ├── decisions.md    ← architectural decisions with rationale
+│   ├── learnings.md    ← implementation discoveries and gotchas
 │   ├── bootstrap.md    ← context reconstruction for new sessions
 │   └── research/       ← saved research findings
 └── orchestration/      ← coordinates multiple agents
@@ -288,10 +289,16 @@ Every task has a contract — a checklist of what "done" means, agreed before an
 `HARNESS.md` now carries the product vision and non-negotiable domain rules. Every agent reads them before touching any task — eliminating implementations that work technically but violate business logic.
 
 ### Session Memory
-`progress.md`, `decisions.md`, and `bootstrap.md` ensure that every new session starts with full context — no wasted tokens figuring out where you left off.
+`progress.md`, `decisions.md`, `learnings.md`, and `bootstrap.md` ensure that every new session starts with full context — no wasted tokens figuring out where you left off. `learnings.md` captures implementation discoveries made during tasks (patterns found, gotchas, non-obvious behavior) so future agents don't repeat the same mistakes.
 
 ### Progressive Harness Levels
 Start with just specs and tasks (Level 1). Add memory and skills (Level 2). Add sensors and two-agent orchestration (Level 3). Use only what you need.
+
+### Continuation Protocol
+If a task is too large for one context window, the agent writes a `[CHECKPOINT]` to `progress.md` and signals for continuation. Running `rig-spec resume` starts a fresh context window that reads the checkpoint and picks up exactly where the previous agent stopped — no lost work, no duplicate effort.
+
+### Git Workflow Built In
+`HARNESS.md` includes a git workflow section: one branch per feature, one commit per validated task. After `rig-spec done`, the CLI suggests the commit command with the correct format. Agents never commit autonomously — the commit step belongs to the human.
 
 ### Model-Agnostic
 Works with Claude Code, Gemini, Antigravity, Cursor, or any other AI tool. No lock-in. Everything is Markdown. No API calls in the CLI.

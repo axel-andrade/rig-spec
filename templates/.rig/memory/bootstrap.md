@@ -23,17 +23,22 @@
 
 **What it answers:** Why are things the way they are? Do not re-debate decided issues.
 
-### 4. Research Findings (when relevant)
+### 4. Learnings (when working on related features)
+→ Read `.rig/memory/learnings.md`
+
+**What it answers:** What patterns and gotchas were discovered during previous tasks? Do not repeat known mistakes.
+
+### 5. Research Findings (when relevant)
 → Read `.rig/memory/research/[relevant-topic].md`
 
 **What it answers:** What was already investigated? Do not re-research what's already documented.
 
-### 5. Active Feature Spec (when in progress)
+### 6. Active Feature Spec (when in progress)
 → Read the active spec: `.rig/feedforward/specs/[active-feature].spec.md`
 
 **What it answers:** What are we building? What are the acceptance criteria? What are the approved fixtures?
 
-### 6. Current Task (when in progress)
+### 7. Current Task (when in progress)
 → Read the next pending task in `.rig/feedforward/tasks/[feature]/`
 
 **What it answers:** What exactly should be built next? What files are owned? What is the contract?

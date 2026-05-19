@@ -3127,6 +3127,14 @@ cmd_resume() {
     echo ""
   fi
 
+  # Print learnings if exists
+  if [ -f "$RIG_DIR/memory/learnings.md" ]; then
+    cat "$RIG_DIR/memory/learnings.md"
+    echo ""
+    echo "---"
+    echo ""
+  fi
+
   # Print active spec if set
   local harness="$RIG_DIR/HARNESS.md"
   if [ -f "$harness" ]; then
@@ -3444,6 +3452,15 @@ cmd_run() {
       echo ""
     fi
 
+    if [ -f "$RIG_DIR/memory/learnings.md" ]; then
+      echo "## Implementation Learnings"
+      echo ""
+      cat "$RIG_DIR/memory/learnings.md"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+
     # Rules
     if [ -d "$RIG_DIR/feedforward/rules" ]; then
       local rules_files
@@ -3489,8 +3506,15 @@ cmd_run() {
     echo "Rules:"
     echo "- Build only what the contract specifies"
     echo "- Only modify files listed in File Ownership"
+    echo "- Run sensors during implementation as a self-repair pre-check"
     echo "- Check each contract item when complete"
-    echo "- Do not self-validate — rig-spec validate will run after"
+    echo "- The validator — not you — declares the task done"
+    echo "- Record discoveries in memory/learnings.md before handoff"
+    echo ""
+    echo "If you cannot finish (context too full or task too large):"
+    echo "1. Write [CHECKPOINT] to memory/progress.md with what's done and what remains"
+    echo "2. Leave unfinished contract items unchecked"
+    echo "3. End with: CHECKPOINT SAVED — run rig-spec resume to continue"
     echo ""
   } > "$context_file"
 
@@ -3683,6 +3707,24 @@ cmd_done() {
   echo ""
   echo -e "  ${GREEN}${BOLD}✓ $task_id marked done${RESET}"
   [ "$total_tasks" -gt 0 ] && echo -e "  ${DIM}Progress: $done_tasks/$total_tasks tasks complete in '$feature'${RESET}"
+
+  # Git commit suggestion
+  if git rev-parse --git-dir > /dev/null 2>&1; then
+    local changed
+    changed=$(git diff --name-only HEAD 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$changed" -gt 0 ]; then
+      echo ""
+      echo -e "  ${DIM}──────────────────────────────────────${RESET}"
+      echo -e "  ${BOLD}Commit this task:${RESET}"
+      echo ""
+      echo -e "  ${DIM}git add -p${RESET}"
+      if [ -n "$feature" ]; then
+        echo -e "  ${DIM}git commit -m \"feat($feature): $task_id — [summary]\"${RESET}"
+      else
+        echo -e "  ${DIM}git commit -m \"feat: $task_id — [summary]\"${RESET}"
+      fi
+    fi
+  fi
 
   if [ "$next_task" != "none" ] && [ "$next_task" != "none — all tasks complete" ]; then
     echo ""

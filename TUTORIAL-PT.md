@@ -148,6 +148,7 @@ Depois do init, sua pasta `.rig/` vai ter essa estrutura:
 ├── memory/
 │   ├── progress.md             ← o que foi feito, o que falta
 │   ├── decisions.md            ← decisões arquiteturais
+│   ├── learnings.md            ← descobertas de implementação e gotchas
 │   ├── bootstrap.md            ← ordem de leitura para nova sessão
 │   └── research/               ← notas de pesquisa
 ├── orchestration/
@@ -257,6 +258,16 @@ O agente lê tudo, implementa o que está no contrato e assina cada item.
 
 > Os arquivos `context-*.md` são temporários e já estão no `.rig/.gitignore` — não vão parar no seu repositório.
 
+**E se o agente não conseguir terminar em uma sessão?**
+
+Tasks longas podem exceder a janela de contexto. Quando isso acontece, o agente deve seguir o **Continuation Protocol**:
+
+1. Escreve um `[CHECKPOINT]` em `memory/progress.md` com o que foi feito e o que falta
+2. Deixa os itens de contrato incompletos desmarcados
+3. Sinaliza: `CHECKPOINT SAVED — run rig-spec resume to continue`
+
+Você roda `rig-spec resume` — o próximo agente começa com contexto limpo e lê o checkpoint para saber exatamente onde continuar.
+
 ---
 
 ### 7. Validar
@@ -279,6 +290,21 @@ rig-spec validate task-01
 
 O agente recebe a lista de falhas específicas e corrige. Você roda `rig-spec validate` novamente até tudo passar.
 
+**Quando tudo passar, marque a task como concluída:**
+
+```bash
+rig-spec done task-01
+```
+
+O comando atualiza o `progress.md`, aponta para a próxima task e — se você estiver em um repositório git com alterações não commitadas — sugere o comando de commit:
+
+```
+git add -p
+git commit -m "feat(sistema-de-notificacoes): task-01 — [resumo]"
+```
+
+A sugestão aparece formatada com o nome da feature e o id da task. O commit é sempre do humano — o agente nunca commita por conta própria.
+
 ---
 
 ### 8. Retomar uma sessão
@@ -289,7 +315,9 @@ Abriu o computador no dia seguinte e não lembra onde parou?
 rig-spec resume
 ```
 
-Imprime o contexto completo: projeto, o que foi feito, o que está pendente, próxima task. Cole no agente e continue de onde parou — sem gastar tokens reconstruindo contexto.
+Imprime o contexto completo: projeto, o que foi feito, o que está pendente, descobertas de implementação (`learnings.md`) e a spec ativa. Cole no agente e continue de onde parou — sem gastar tokens reconstruindo contexto.
+
+Se a sessão anterior terminou com um `[CHECKPOINT]` em `progress.md`, o agente lê e sabe exatamente onde continuar dentro da task interrompida.
 
 ---
 
@@ -726,18 +754,25 @@ rig-spec run task-01
 
 # 7. Validar
 rig-spec validate task-01
-# → todos os sensores passaram? próxima task
+# → todos os sensores passaram? marque como done
 # → algum falhou? agente corrige → valida de novo
 
-# 8. Próxima task
+# 8. Marcar task como concluída e commitar
+rig-spec done task-01
+# → progress.md atualizado → próxima task indicada
+# → git add -p && git commit -m "feat(cadastro-de-usuarios): task-01 — [resumo]"
+
+# 9. Próxima task
 rig-spec run task-02
 rig-spec validate task-02
+rig-spec done task-02
 
-# 9. Nova sessão (amanhã)
+# 10. Nova sessão (amanhã)
 rig-spec resume
 # → cole no agente → contexto completo reconstruído → continue
+# → se tinha [CHECKPOINT], agente continua de onde parou
 
-# 10. Ver progresso
+# 11. Ver progresso
 rig-spec status
 ```
 
@@ -760,6 +795,9 @@ Sim. Use `rig-spec init --retrofit`. O comando varre o `src/` real do projeto e 
 **O agente pode alterar os Approved Fixtures?**
 Não. Os fixtures são definidos pelo humano antes dos testes serem escritos. O agente é instruído explicitamente a não tocá-los. Se um teste falha, o código é corrigido — nunca o fixture.
 
+**E se o agente parar no meio de uma task?**
+É o comportamento esperado para tasks longas. O agente escreve um `[CHECKPOINT]` em `memory/progress.md` descrevendo o que foi feito e o que falta, deixa os itens do contrato incompletos desmarcados e sinaliza para você rodar `rig-spec resume`. O próximo agente começa com contexto limpo e continua do checkpoint — sem perder trabalho.
+
 **E se eu não quiser usar dois agentes?**
 Tudo bem. O Caminho 1 (agente único, você valida) funciona perfeitamente. Os perfis de implementer/validator ficam disponíveis quando você estiver pronto para o Caminho 2.
 
@@ -778,7 +816,8 @@ Tudo bem. O Caminho 1 (agente único, você valida) funciona perfeitamente. Os p
 | `rig-spec run <task-id>` | Monta contexto completo para o agente implementar |
 | `rig-spec validate` | Roda todos os sensores |
 | `rig-spec validate <task-id>` | Sensores + mostra checklist do contrato da task |
-| `rig-spec resume` | Imprime contexto completo para retomar sessão |
+| `rig-spec done <task-id>` | Marca task como concluída, atualiza progress.md, sugere commit git |
+| `rig-spec resume` | Imprime contexto completo para retomar sessão (inclui learnings e checkpoint) |
 | `rig-spec status` | Mostra progresso: feature ativa, tasks, última sessão |
 | `rig-spec research <tema>` | Cria arquivo de pesquisa em `memory/research/` |
 | `rig-spec audit` | Roda sensores de drift, salva relatório |

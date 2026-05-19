@@ -59,6 +59,29 @@ Full instructions: `memory/bootstrap.md`
 
 - None (Level 1 — manual contract validation)
 
+## Git Workflow
+
+**Branch per feature:** create a branch from `main` when starting a spec.
+
+```
+git checkout -b feat/[feature-name]
+```
+
+**Commit per task:** after `rig-spec validate` passes and the task is marked done, commit the work.
+
+```
+git add -p
+git commit -m "feat([feature-name]): [task-id] — [one line summary]"
+```
+
+**Merge when the spec is complete:** all tasks done, all sensors green, audit clean.
+
+```
+git checkout main && git merge --no-ff feat/[feature-name]
+```
+
+> Agents must not commit on behalf of the human unless explicitly instructed. The commit step belongs to the human after `rig-spec done`.
+
 ---
 
 ## Key Files
@@ -72,5 +95,6 @@ Full instructions: `memory/bootstrap.md`
 | `feedback/sensors/` | Automated validation commands |
 | `memory/progress.md` | Current state of all work |
 | `memory/decisions.md` | Architectural decisions |
+| `memory/learnings.md` | Implementation discoveries and gotchas |
 | `memory/research/` | Research session findings |
 | `orchestration/contracts/` | Implementer-validator agreements |
