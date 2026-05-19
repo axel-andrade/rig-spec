@@ -5,14 +5,24 @@
 # Safe: never overwrites your specs, tasks, rules, research, skills, or project context.
 #
 # Usage:
-#   bash update.sh           — run from inside any project that has .rig/
-#   bash /path/to/update.sh  — run from anywhere (detects .rig/ in current dir)
+#   bash update.sh                        — local (run from rig-spec repo root)
+#   bash /path/to/update.sh              — local (any path)
+#   curl -fsSL <raw-url>/update.sh | bash — remote (downloads templates from GitHub)
 
 set -e
 
+REPO="https://raw.githubusercontent.com/axel-andrade/rig-spec/main"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATES="$SCRIPT_DIR/templates/.rig"
 RIG_DIR=".rig"
+
+# Detect source: local templates or GitHub
+if [ -d "$SCRIPT_DIR/templates/.rig" ]; then
+  TEMPLATES="$SCRIPT_DIR/templates/.rig"
+  TEMPLATE_SOURCE="local"
+else
+  TEMPLATES=""
+  TEMPLATE_SOURCE="github"
+fi
 
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -35,6 +45,31 @@ inc_updated() { ((_updated++)) || true; }
 inc_created() { ((_created++)) || true; }
 inc_skipped() { ((_skipped++)) || true; }
 
+# Fetch a template file to a destination path.
+# Uses local copy if available; downloads from GitHub otherwise.
+fetch_template() {
+  local rel="$1"   # e.g. "memory/bootstrap.md"
+  local dst="$2"   # absolute destination path
+
+  mkdir -p "$(dirname "$dst")"
+
+  if [ "$TEMPLATE_SOURCE" = "local" ]; then
+    local src="$TEMPLATES/$rel"
+    if [ ! -f "$src" ]; then
+      print_warn "$rel — not found in local templates"
+      return 1
+    fi
+    cp "$src" "$dst"
+  else
+    local url="$REPO/templates/.rig/$rel"
+    if ! curl -fsSL "$url" -o "$dst" 2>/dev/null; then
+      print_warn "$rel — download failed ($url)"
+      return 1
+    fi
+  fi
+  return 0
+}
+
 # ─────────────────────────────────────────────
 # Guards
 # ─────────────────────────────────────────────
@@ -53,13 +88,16 @@ if [ ! -d "$RIG_DIR" ]; then
   exit 1
 fi
 
-if [ ! -d "$TEMPLATES" ]; then
-  echo ""
-  echo -e "  ${RED}✗${RESET} templates/.rig/ not found relative to update.sh."
-  echo ""
-  echo "  Make sure update.sh is run from the rig-spec repo root."
-  echo ""
-  exit 1
+if [ "$TEMPLATE_SOURCE" = "github" ]; then
+  if ! command -v curl &>/dev/null; then
+    echo ""
+    echo -e "  ${RED}✗${RESET} curl not found. Install curl or run update.sh from the rig-spec repo."
+    echo ""
+    exit 1
+  fi
+  echo -e "  ${DIM}Source: GitHub ($REPO)${RESET}"
+else
+  echo -e "  ${DIM}Source: local ($TEMPLATES)${RESET}"
 fi
 
 # ─────────────────────────────────────────────
@@ -71,19 +109,14 @@ print_step "1/5  Framework files (safe to replace)"
 
 replace_framework_file() {
   local rel="$1"
-  local src="$TEMPLATES/$rel"
   local dst="$RIG_DIR/$rel"
 
-  if [ ! -f "$src" ]; then
-    print_skip "$rel — not in templates, skipping"
+  if fetch_template "$rel" "$dst"; then
+    print_ok "$rel"
+    inc_updated
+  else
     inc_skipped
-    return
   fi
-
-  mkdir -p "$(dirname "$dst")"
-  cp "$src" "$dst"
-  print_ok "$rel"
-  inc_updated
 }
 
 replace_framework_file "memory/bootstrap.md"
@@ -101,23 +134,16 @@ print_step "2/5  New files (create if absent)"
 
 create_if_absent() {
   local rel="$1"
-  local src="$TEMPLATES/$rel"
   local dst="$RIG_DIR/$rel"
-
-  if [ ! -f "$src" ]; then
-    print_skip "$rel — not in templates, skipping"
-    inc_skipped
-    return
-  fi
 
   if [ -f "$dst" ]; then
     print_skip "$rel — already exists, not touched"
     inc_skipped
-  else
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
+  elif fetch_template "$rel" "$dst"; then
     print_ok "Created: $rel"
     inc_created
+  else
+    inc_skipped
   fi
 }
 
@@ -157,7 +183,9 @@ else
   fi
 
   # 3b. Update Context Reconstruction order if it still has the old 5-step format
-  if grep -q "memory/learnings.md" "$HARNESS"; then
+  # Check specifically for learnings.md inside the Context Reconstruction section
+  _ctx_has_learnings=$(awk '/^## Context Reconstruction/{p=1} p && /memory\/learnings/{print "yes"; exit}' "$HARNESS")
+  if [ "$_ctx_has_learnings" = "yes" ]; then
     print_skip "Context Reconstruction — already has learnings.md"
     inc_skipped
   else
@@ -335,22 +363,21 @@ fi
 print_step "5/5  feedforward/mcp.config.md (only if unchanged)"
 
 MCP="$RIG_DIR/feedforward/mcp.config.md"
-MCP_TEMPLATE="$TEMPLATES/feedforward/mcp.config.md"
 
 if [ ! -f "$MCP" ]; then
   print_skip "mcp.config.md not found"
-  inc_skipped
-elif [ ! -f "$MCP_TEMPLATE" ]; then
-  print_skip "mcp.config.md — no template source, skipping"
   inc_skipped
 elif grep -q "context7" "$MCP"; then
   print_skip "mcp.config.md — already has suggested servers, not touched"
   inc_skipped
 elif grep -q "\[Add an entry for each MCP server" "$MCP"; then
   # Still the default placeholder — safe to replace
-  cp "$MCP_TEMPLATE" "$MCP"
-  print_ok "mcp.config.md updated with suggested servers (context7, brave-search, filesystem)"
-  inc_updated
+  if fetch_template "feedforward/mcp.config.md" "$MCP"; then
+    print_ok "mcp.config.md updated with suggested servers (context7, brave-search, filesystem)"
+    inc_updated
+  else
+    inc_skipped
+  fi
 else
   print_skip "mcp.config.md — has custom content, not touched"
   inc_skipped
