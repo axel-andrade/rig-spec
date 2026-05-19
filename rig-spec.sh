@@ -3,7 +3,7 @@
 # https://github.com/axel-andrade/rig-spec
 set -e
 
-RIGSPEC_VERSION="1.1.0"
+RIGSPEC_VERSION="1.0.0"
 RIG_DIR=".rig"
 REPO="https://github.com/axel-andrade/rig-spec"
 PROJECT_DESCRIPTION=""
