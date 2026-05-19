@@ -43,6 +43,143 @@ require_rig() {
 
 today() { date +%Y-%m-%d; }
 
+# Prefix for new task files — sorts chronologically in directory listings
+task_ts_prefix() { date +%Y%m%d-%H%M%S; }
+
+# Active feature slug from HARNESS.md (narrows ambiguous task lookup)
+harness_active_feature() {
+  local harness="$RIG_DIR/HARNESS.md"
+  [ ! -f "$harness" ] && return
+  grep -m1 '^\*\*Active Feature:\*\*' "$harness" 2>/dev/null \
+    | sed 's/^\*\*Active Feature:\*\*[[:space:]]*//' \
+    | sed 's/[[:space:]].*$//' \
+    | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-'
+}
+
+# List matching task paths (one per line). Optional feature scope limits the folder.
+_find_task_candidates() {
+  local fragment="$1"
+  local feature_scope="${2:-}"
+  local search_root="$RIG_DIR/feedforward/tasks"
+
+  if [ -n "$feature_scope" ]; then
+    search_root="$RIG_DIR/feedforward/tasks/$feature_scope"
+    [ ! -d "$search_root" ] && return
+  fi
+
+  find "$search_root" -name "*${fragment}*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort
+}
+
+# Print ambiguity help to stderr
+_print_task_ambiguity() {
+  local fragment="$1"
+  shift
+  local matches=("$@")
+  print_err "Ambiguous task id: $fragment (${#matches[@]} matches)"
+  echo ""
+  echo "  Use a qualified id (feature folder + fragment):"
+  echo ""
+  local m feature_dir base
+  for m in "${matches[@]}"; do
+    feature_dir=$(basename "$(dirname "$m")")
+    base=$(basename "$m" .task.md)
+    echo "    rig-spec run ${feature_dir}/${fragment}"
+    echo "      → $(basename "$m")"
+  done
+  echo ""
+  local active
+  active=$(harness_active_feature)
+  if [ -n "$active" ] && [ "$active" != "none" ]; then
+    echo "  Or set focus in HARNESS.md (**Active Feature:**) and use a more specific fragment."
+    echo "  Current active feature: $active"
+  fi
+  echo ""
+}
+
+# Find task file by id fragment or qualified id (feature/01-slug).
+# Exits with message if zero or multiple matches (unless narrowed by active feature).
+find_task_file() {
+  local task_id="$1"
+  local feature_scope=""
+  local fragment="$task_id"
+
+  # Qualified: spec-name/01-data-layer or spec-name:01-data-layer
+  if [[ "$task_id" == */* ]]; then
+    feature_scope="${task_id%%/*}"
+    fragment="${task_id#*/}"
+  elif [[ "$task_id" == *:* ]]; then
+    feature_scope="${task_id%%:*}"
+    fragment="${task_id#*:}"
+  fi
+
+  fragment="${fragment%.task.md}"
+
+  local matches_raw
+  matches_raw=$(_find_task_candidates "$fragment" "$feature_scope")
+
+  if [ -z "$matches_raw" ]; then
+    return 1
+  fi
+
+  local -a matches=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && matches+=("$line")
+  done <<< "$matches_raw"
+
+  if [ "${#matches[@]}" -eq 1 ]; then
+    echo "${matches[0]}"
+    return 0
+  fi
+
+  # Multiple matches — narrow by HARNESS active feature if no scope was given
+  if [ -z "$feature_scope" ]; then
+    local active narrowed_raw
+    active=$(harness_active_feature)
+    if [ -n "$active" ] && [ "$active" != "none" ]; then
+      narrowed_raw=$(_find_task_candidates "$fragment" "$active")
+      if [ -n "$narrowed_raw" ]; then
+        local -a narrowed=()
+        while IFS= read -r line; do
+          [ -n "$line" ] && narrowed+=("$line")
+        done <<< "$narrowed_raw"
+        if [ "${#narrowed[@]}" -eq 1 ]; then
+          echo "${narrowed[0]}"
+          return 0
+        fi
+        if [ "${#narrowed[@]}" -gt 1 ]; then
+          _print_task_ambiguity "$fragment" "${narrowed[@]}"
+          return 2
+        fi
+      fi
+    fi
+  fi
+
+  _print_task_ambiguity "$fragment" "${matches[@]}"
+  return 2
+}
+
+# Safe wrapper: returns path or empty; prints ambiguity to stderr
+find_task_file_or_fail() {
+  local task_id="$1"
+  local result rc=0
+  result=$(find_task_file "$task_id") || rc=$?
+  if [ "$rc" -eq 2 ]; then
+    exit 1
+  fi
+  if [ "$rc" -ne 0 ] || [ -z "$result" ]; then
+    return 1
+  fi
+  echo "$result"
+  return 0
+}
+
+shape_slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-'
+}
+
+shape_qa_path() { echo "$RIG_DIR/memory/shape-qa/$(shape_slugify "$1").md"; }
+plan_qa_path()  { echo "$RIG_DIR/memory/plan-qa/$(shape_slugify "$1").md"; }
+
 # Extracts the bash command block from a sensor/audit markdown file.
 # Looks for ## Command followed by ```bash ... ```
 extract_command() {
@@ -595,6 +732,10 @@ EOF
 write_task_template() {
   cat > "$RIG_DIR/feedforward/tasks/_TEMPLATE.task.md" << 'EOF'
 # Task [XX] — [Task Name]
+
+> **Filename:** `YYYYMMDD-HHMMSS-[XX]-[slug].task.md` (timestamp first — keeps tasks sorted)
+> Example: `20260519-143052-01-dependencies.task.md`
+> Run with: `rig-spec run 01-dependencies` (partial match works)
 
 ---
 
@@ -3212,6 +3353,8 @@ cmd_init() {
   mkdir -p "$RIG_DIR/feedback/reports"
   mkdir -p "$RIG_DIR/feedback/audit"
   mkdir -p "$RIG_DIR/memory/research"
+  mkdir -p "$RIG_DIR/memory/shape-qa"
+  mkdir -p "$RIG_DIR/memory/plan-qa"
   mkdir -p "$RIG_DIR/orchestration/contracts"
   print_ok "Folder structure created"
 
@@ -3449,7 +3592,11 @@ cmd_validate() {
   # If task-id given, find and show the task contract before running sensors
   local task_file=""
   if [ -n "$task_id" ]; then
-    task_file=$(find "$RIG_DIR/feedforward/tasks" -name "*${task_id}*.md" ! -name "_TEMPLATE*" 2>/dev/null | head -1)
+    local _find_rc=0
+    task_file=$(find_task_file "$task_id") || _find_rc=$?
+    if [ "$_find_rc" -eq 2 ]; then
+      exit 1
+    fi
     if [ -n "$task_file" ]; then
       echo -e "  ${BOLD}Contract:${RESET} $(basename "$task_file")"
       echo ""
@@ -3712,7 +3859,11 @@ cmd_run() {
     echo ""
     print_err "Usage: rig-spec run <task-id>"
     echo ""
-    echo "  Example: rig-spec run task-01"
+    echo "  Examples:"
+    echo "    rig-spec run 01-data-layer"
+    echo "    rig-spec run allow-multiple-consultations/01-data-layer"
+    echo ""
+    echo "  If two features have similar task names, use feature/fragment."
     echo ""
     exit 1
   fi
@@ -3724,19 +3875,35 @@ cmd_run() {
 
   # Find the task file
   local task_file
-  task_file=$(find "$RIG_DIR/feedforward/tasks" -name "*${task_id}*.md" ! -name "_TEMPLATE*" 2>/dev/null | head -1)
-
-  if [ -z "$task_file" ]; then
+  if ! task_file=$(find_task_file_or_fail "$task_id"); then
     print_err "Task not found: $task_id"
     echo ""
-    echo "  Available tasks:"
-    find "$RIG_DIR/feedforward/tasks" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | \
-      while IFS= read -r f; do echo "    $(basename "$f")"; done
+    echo "  Available tasks (use feature/fragment when names collide):"
+    find "$RIG_DIR/feedforward/tasks" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort | \
+      while IFS= read -r f; do
+        local feat base short
+        feat=$(basename "$(dirname "$f")")
+        base=$(basename "$f" .task.md)
+        short="$base"
+        if [[ "$base" =~ ^[0-9]{8}-[0-9]{6}- ]]; then
+          short=$(echo "$base" | sed -E 's/^[0-9]{8}-[0-9]{6}-//')
+        fi
+        echo "    rig-spec run ${feat}/${short}"
+        echo "      → $(basename "$f")"
+      done
     echo ""
     exit 1
   fi
 
+  local task_basename feature_dir task_short_id
+  task_basename=$(basename "$task_file" .task.md)
+  feature_dir=$(basename "$(dirname "$task_file")")
+  task_short_id="$task_basename"
+  if [[ "$task_basename" =~ ^[0-9]{8}-[0-9]{6}- ]]; then
+    task_short_id=$(echo "$task_basename" | sed -E 's/^[0-9]{8}-[0-9]{6}-//')
+  fi
   print_ok "Task found: $task_file"
+  echo -e "  ${DIM}Qualified id: ${feature_dir}/${task_short_id}${RESET}"
 
   # Find spec reference
   local spec_ref
@@ -3768,10 +3935,10 @@ cmd_run() {
     fi
   done < <(resolve_skills_for_task "$task_file")
 
-  # Assemble context
-  local context_file="$RIG_DIR/context-${task_id}.md"
+  # Assemble context (basename avoids collisions when task_id is a short fragment)
+  local context_file="$RIG_DIR/context-${task_basename}.md"
   {
-    echo "# Agent Context — $task_id"
+    echo "# Agent Context — $task_basename"
     echo ""
     echo "> Assembled by rig-spec run. Read everything below before writing any code."
     echo ""
@@ -3881,7 +4048,7 @@ cmd_run() {
   } > "$context_file"
 
   # Save current task so validate/done can pick it up without repeating the id
-  echo "$task_id" > "$RIG_DIR/.current-task"
+  echo "$task_basename" > "$RIG_DIR/.current-task"
 
   # Mark task as in-progress in progress.md
   patch_progress_task_inprogress "$task_id"
@@ -4018,7 +4185,10 @@ cmd_done() {
 
   # Find which feature/spec this task belongs to
   local task_file
-  task_file=$(find "$RIG_DIR/feedforward/tasks" -name "*${task_id}*.md" ! -name "_TEMPLATE*" 2>/dev/null | head -1)
+  if ! task_file=$(find_task_file_or_fail "$task_id"); then
+    print_err "Task not found: $task_id"
+    exit 1
+  fi
   local feature=""
   if [ -n "$task_file" ]; then
     feature=$(basename "$(dirname "$task_file")")
@@ -4027,18 +4197,20 @@ cmd_done() {
     print_warn "Task file not found for '$task_id' — updating progress without task reference"
   fi
 
-  # Find next pending task in same feature
+  # Find next pending task in same feature (lexicographic = chronological when timestamp-prefixed)
   local next_task="none"
-  if [ -n "$feature" ]; then
+  if [ -n "$feature" ] && [ -n "$task_file" ]; then
     local task_dir="$RIG_DIR/feedforward/tasks/$feature"
-    next_task=$(find "$task_dir" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort | \
-      while IFS= read -r f; do
-        local base
-        base=$(basename "$f" .task.md)
-        # Return the first task that sorts after the current one
-        [[ "$base" > "$task_id" ]] && { echo "$base"; break; }
-      done)
-    [ -z "$next_task" ] && next_task="none — all tasks complete"
+    local sorted found_next=false
+    sorted=$(find "$task_dir" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
+    while IFS= read -r f; do
+      if $found_next; then
+        next_task=$(basename "$f" .task.md)
+        break
+      fi
+      [ "$f" = "$task_file" ] && found_next=true
+    done <<< "$sorted"
+    [ "$next_task" = "none" ] && next_task="none — all tasks complete"
   fi
 
   # Update progress.md
@@ -4189,59 +4361,85 @@ cmd_shape() {
   require_rig
   local feature=""
   local from_file=""
+  local phase="discover"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --from) from_file="$2"; shift 2 ;;
-      *)      feature="${feature:+$feature }$1"; shift ;;
+      --from)     from_file="$2"; shift 2 ;;
+      --complete) phase="complete"; shift ;;
+      *)          feature="${feature:+$feature }$1"; shift ;;
     esac
   done
 
   if [ -z "$feature" ]; then
     echo ""
-    print_err "Usage: rig-spec shape <feature-name> [--from <file>]"
+    print_err "Usage: rig-spec shape <feature-name> [--from <file>] [--complete]"
+    echo ""
+    echo "  Phase 1 (default): CLI questions + agent asks clarifying questions (no full spec yet)"
+    echo "  Phase 2: rig-spec shape <feature> --complete  (after saving Q&A from the agent)"
     echo ""
     exit 1
   fi
 
+  local slug
+  slug=$(shape_slugify "$feature")
+  local spec_file="$RIG_DIR/feedforward/specs/${slug}.spec.md"
+  local qa_file
+  qa_file=$(shape_qa_path "$feature")
+
+  if [ "$phase" = "complete" ]; then
+    cmd_shape_complete "$feature" "$slug" "$spec_file" "$qa_file" "$from_file"
+    return
+  fi
+
   echo ""
-  echo -e "${BOLD}${CYAN}rig-spec shape — $feature${RESET}"
+  echo -e "${BOLD}${CYAN}rig-spec shape — $feature${RESET} ${DIM}(phase 1: discover)${RESET}"
   echo -e "${CYAN}──────────────────────────────────────${RESET}"
   echo ""
-  echo -e "  ${DIM}Answer a few questions to shape this spec.${RESET}"
-  echo -e "  ${DIM}Press Enter to skip any question.${RESET}"
+  echo -e "  ${DIM}Answer in the terminal first, then the AI agent will ask MORE questions before writing the spec.${RESET}"
+  echo -e "  ${DIM}Press Enter to skip only if you will answer in the agent chat.${RESET}"
   echo ""
 
-  # ── Interactive questions ──────────────────
+  # ── Interactive questions (CLI) ──────────────────
   echo -e "  ${BOLD}1. What problem does this solve?${RESET}"
-  echo -e "  ${DIM}(What's broken or missing today?)${RESET}"
   read -r -p "  → " q_problem
   echo ""
 
   echo -e "  ${BOLD}2. Who are the users?${RESET}"
-  echo -e "  ${DIM}(Who will use this feature?)${RESET}"
   read -r -p "  → " q_users
   echo ""
 
   echo -e "  ${BOLD}3. What is the main goal?${RESET}"
-  echo -e "  ${DIM}(What changes for the user when this is done?)${RESET}"
   read -r -p "  → " q_goal
   echo ""
 
   echo -e "  ${BOLD}4. What is explicitly out of scope?${RESET}"
-  echo -e "  ${DIM}(What will NOT be built in this spec?)${RESET}"
   read -r -p "  → " q_out_of_scope
   echo ""
 
-  echo -e "  ${BOLD}5. Any known constraints or design decisions?${RESET}"
-  echo -e "  ${DIM}(Architecture choices, limitations, dependencies — optional)${RESET}"
+  echo -e "  ${BOLD}5. Constraints or design decisions?${RESET}"
   read -r -p "  → " q_constraints
   echo ""
 
-  # ── Create spec file ──────────────────────
-  local slug
-  slug=$(echo "$feature" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
-  local spec_file="$RIG_DIR/feedforward/specs/${slug}.spec.md"
+  echo -e "  ${BOLD}6. Main user flows (happy path)?${RESET}"
+  read -r -p "  → " q_flows
+  echo ""
+
+  echo -e "  ${BOLD}7. Edge cases, errors, or permissions to consider?${RESET}"
+  read -r -p "  → " q_edge
+  echo ""
+
+  echo -e "  ${BOLD}8. How will we know it is done (measurable)?${RESET}"
+  read -r -p "  → " q_success
+  echo ""
+
+  if [ -z "$q_problem" ] && [ -z "$q_goal" ]; then
+    print_warn "Problem and goal are empty — the agent MUST ask clarifying questions in chat."
+    echo ""
+  fi
+
+  # ── Create draft spec file (CLI answers only) ──────────────────────
+  mkdir -p "$(dirname "$qa_file")"
 
   # Build out-of-scope list
   local oos_content="- Not included: [add more]"
@@ -4254,6 +4452,9 @@ cmd_shape() {
   if [ -n "$q_constraints" ]; then
     design_content="$q_constraints"
   fi
+  [ -n "$q_flows" ]   && design_content="${design_content}"$'\n\n'"**Flows (CLI):** $q_flows"
+  [ -n "$q_edge" ]    && design_content="${design_content}"$'\n\n'"**Edge cases (CLI):** $q_edge"
+  [ -n "$q_success" ] && design_content="${design_content}"$'\n\n'"**Success metrics (CLI):** $q_success"
 
   cat > "$spec_file" << EOF
 # Spec: $feature
@@ -4323,19 +4524,46 @@ EOF
   patch_harness_focus "$slug" "none — run rig-spec plan $slug"
   patch_progress_add_feature "$feature" "feedforward/specs/${slug}.spec.md"
   patch_progress_last_session \
-    "Spec created for '$feature' via rig-spec shape." \
-    "Complete Approved Fixtures in $spec_file, then run: rig-spec plan $slug"
+    "Spec draft for '$feature' via rig-spec shape (phase 1)." \
+    "Answer agent questions → save to $qa_file → rig-spec shape \"$feature\" --complete"
   print_ok "HARNESS.md and progress.md updated"
   echo ""
 
-  # ── Assemble agent context ─────────────────
+  # Q&A file template (human + agent fill before --complete)
+  if [ ! -f "$qa_file" ]; then
+    cat > "$qa_file" << EOF
+# Shape Q&A: $feature
+
+> Phase 1: paste the agent's clarifying questions below, then your answers.
+> Phase 2: run \`rig-spec shape "$feature" --complete\` after this file is filled.
+
+## Agent questions (paste from chat)
+
+1.
+2.
+3.
+
+## Human answers
+
+1.
+2.
+3.
+
+## Additional notes
+
+EOF
+    print_ok "Q&A template: $qa_file"
+  fi
+
+  # ── Assemble agent context (phase 1: questions only) ─────────────────
   local context_file="$RIG_DIR/context-shape-${slug}.md"
   {
-    echo "# Complete this spec: $feature"
+    echo "# Shape spec (phase 1 — discover): $feature"
     echo ""
-    echo "> You are helping write a spec for a software feature."
-    echo "> The human has already answered the key questions below."
-    echo "> Your job is to complete the missing sections following the rig-spec format."
+    echo "> **STOP — read before acting.**"
+    echo "> This is **phase 1**. Your ONLY job is to ask clarifying questions."
+    echo "> Do **NOT** write or rewrite the spec file. Do **NOT** use \`## File:\` blocks."
+    echo "> The human will answer in chat, save Q&A to \`$qa_file\`, then run \`rig-spec shape \"$feature\" --complete\`."
     echo ""
     echo "---"
     echo ""
@@ -4346,7 +4574,6 @@ EOF
     echo "---"
     echo ""
 
-    # Include research if available
     if [ -d "$RIG_DIR/memory/research" ]; then
       local research_files
       research_files=$(find "$RIG_DIR/memory/research" -name "*.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
@@ -4371,7 +4598,7 @@ EOF
       echo ""
     fi
 
-    echo "## What the Human Already Defined"
+    echo "## What the Human Already Defined (CLI)"
     echo ""
     echo "**Feature:** $feature"
     [ -n "$q_problem" ]      && echo "**Problem:** $q_problem"
@@ -4379,72 +4606,163 @@ EOF
     [ -n "$q_users" ]        && echo "**Users:** $q_users"
     [ -n "$q_out_of_scope" ] && echo "**Out of scope:** $q_out_of_scope"
     [ -n "$q_constraints" ]  && echo "**Constraints:** $q_constraints"
+    [ -n "$q_flows" ]        && echo "**Flows:** $q_flows"
+    [ -n "$q_edge" ]         && echo "**Edge cases:** $q_edge"
+    [ -n "$q_success" ]      && echo "**Success metrics:** $q_success"
     echo ""
     echo "---"
     echo ""
-    echo "## Current Spec (partial — needs completion)"
+    echo "## Draft Spec (for context only — do not expand yet)"
     echo ""
     cat "$spec_file"
     echo ""
     echo "---"
     echo ""
-    echo "## Your Instructions"
+    echo "## Your Instructions (phase 1)"
     echo ""
-    echo "Complete the spec above. Specific rules:"
+    echo "Ask **8–12 numbered clarifying questions** before any spec writing."
     echo ""
-    echo "**User Stories**"
-    echo "- Write 2-4 user stories based on the users and goal described"
-    echo "- Format: \"As a [user type], I want [action] so that [benefit]\""
-    echo "- Do not invent user types beyond what was described"
+    echo "Cover gaps in:"
+    echo "- Scope boundaries and explicit non-goals"
+    echo "- User roles and permissions"
+    echo "- Main flows and alternate/error paths"
+    echo "- Data model / persistence / external APIs"
+    echo "- Non-functional requirements (performance, security, audit)"
+    echo "- Integration with existing code in this repo"
+    echo "- Acceptance criteria the human cares about most"
+    echo "- Risks, unknowns, and decisions that need a human call"
     echo ""
-    echo "**Acceptance Criteria**"
-    echo "- Write 3-6 criteria — each must be specific and testable"
-    echo "- Bad: \"The system works correctly\""
-    echo "- Good: \"Email is delivered within 5 seconds of the event\""
-    echo "- Each criterion must be verifiable by a test or a validator agent"
+    echo "Rules:"
+    echo "- Reference what the human already said; do not repeat it as a question"
+    echo "- If CLI answers were empty or vague, say so and ask targeted follow-ups"
+    echo "- Prefer concrete questions (\"Should X happen when Y?\") over generic ones"
+    echo "- End with: \"Save your answers to \`$qa_file\` then run \`rig-spec shape \\\"$feature\\\" --complete\`\""
     echo ""
-    echo "**Approved Fixtures**"
-    echo "- Leave the Approved Fixtures section EMPTY with a note: '[Human must fill this]'"
-    echo "- Do NOT invent expected outputs — that is the human's job"
-    echo "- The human defines what 'correct' looks like before any test is written"
-    echo ""
-    echo "**Out of Scope**"
-    echo "- Do not add items to Out of Scope beyond what the human stated"
-    echo "- If you think something should be excluded, add it as a question at the end"
-    echo ""
-    echo "**Output format — required**"
-    echo "- Output the complete spec using this exact structure:"
-    echo ""
-    echo "  ## File: $spec_file"
-    echo "  \`\`\`markdown"
-    echo "  [full spec content here]"
-    echo "  \`\`\`"
-    echo ""
-    echo "- Preserve all section headers exactly as in the template"
-    echo "- Do NOT output anything after the closing code block except open questions"
-    echo ""
-    echo "At the end, list any open questions you have for the human before implementation starts."
+    echo "**Forbidden in this phase:**"
+    echo "- Writing user stories, acceptance criteria, or fixtures"
+    echo "- Outputting \`## File:\` or full markdown spec content"
+    echo "- Assuming answers — ask instead"
 
   } > "$context_file"
 
   echo -e "${CYAN}──────────────────────────────────────${RESET}"
   echo ""
-  echo -e "  ${BOLD}Next steps:${RESET}"
+  echo -e "  ${BOLD}Next steps (two phases):${RESET}"
   echo ""
-  echo "  1. Fill in the Approved Fixtures section in the spec:"
-  echo "     $spec_file"
-  echo ""
-  echo "  2. Paste this context into your AI agent:"
-  echo ""
+  echo "  1. Paste into your AI agent:"
   echo "     cat $context_file"
   echo ""
-  echo -e "  ${BOLD}3. After the agent responds:${RESET}"
-  echo "     Copy the spec content from the agent's response"
-  echo "     and save it to:"
-  echo "     $spec_file"
+  echo "  2. Answer the agent's questions in chat; copy Q&A into:"
+  echo "     $qa_file"
   echo ""
-  echo -e "  ${DIM}(Claude Code / Cursor: the agent will create the file directly)${RESET}"
-  echo -e "  ${DIM}(Chat / Gemini / ChatGPT: copy the output and save manually)${RESET}"
+  echo "  3. Generate the full spec:"
+  echo "     rig-spec shape \"$feature\" --complete"
+  echo ""
+  echo -e "  ${DIM}Draft spec (CLI only): $spec_file${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_shape_complete — phase 2: write full spec
+# ─────────────────────────────────────────────
+
+cmd_shape_complete() {
+  local feature="$1"
+  local slug="$2"
+  local spec_file="$3"
+  local qa_file="$4"
+  local from_file="$5"
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec shape — $feature${RESET} ${DIM}(phase 2: complete)${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if [ ! -f "$qa_file" ]; then
+    print_warn "Q&A file not found: $qa_file"
+    echo "  Run phase 1 first: rig-spec shape \"$feature\""
+    echo "  Or create the file with agent questions + your answers."
+    echo ""
+    read -r -p "  Continue without Q&A? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      exit 1
+    fi
+  fi
+
+  local context_file="$RIG_DIR/context-shape-${slug}-complete.md"
+  {
+    echo "# Complete spec (phase 2): $feature"
+    echo ""
+    echo "> Q&A is done. Write the **full** spec to \`$spec_file\`."
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Project Context"
+    echo ""
+    cat "$RIG_DIR/HARNESS.md"
+    echo ""
+    echo "---"
+    echo ""
+
+    if [ -f "$qa_file" ]; then
+      echo "## Shape Q&A (human + agent)"
+      echo ""
+      cat "$qa_file"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+
+    if [ -n "$from_file" ] && [ -f "$from_file" ]; then
+      echo "## Input Document"
+      echo ""
+      cat "$from_file"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+
+    if [ -f "$spec_file" ]; then
+      echo "## Current Draft Spec"
+      echo ""
+      cat "$spec_file"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+
+    echo "## Your Instructions (phase 2)"
+    echo ""
+    echo "Produce the complete spec using rig-spec format."
+    echo ""
+    echo "**User Stories** — 2-4, from Q&A and project context"
+    echo "**Acceptance Criteria** — 3-6, specific and testable"
+    echo "**Approved Fixtures** — leave placeholder: \`[Human must fill this]\` — do NOT invent outputs"
+    echo "**Out of Scope** — only what Q&A/human confirmed; flag extras as open questions"
+    echo ""
+    echo "**Output format — required:**"
+    echo ""
+    echo "  ## File: $spec_file"
+    echo "  \`\`\`markdown"
+    echo "  [full spec content]"
+    echo "  \`\`\`"
+    echo ""
+    echo "Preserve section headers from the template. After the block, list any remaining open questions."
+
+  } > "$context_file"
+
+  patch_harness_focus "$slug" "none — run rig-spec plan $slug after fixtures"
+  patch_progress_last_session \
+    "Shape phase 2 context for '$feature'." \
+    "Paste context → save spec → fill Approved Fixtures → rig-spec plan $slug"
+
+  print_ok "Context assembled: $context_file"
+  echo ""
+  echo "  Paste into your AI agent:"
+  echo "    cat $context_file"
+  echo ""
+  echo "  Then save output to: $spec_file"
+  echo "  Next: rig-spec plan $slug"
   echo ""
 }
 
@@ -4520,11 +4838,22 @@ run_sensor_smoketest() {
 
 cmd_plan() {
   require_rig
-  local spec_name="$1"
+  local spec_name=""
+  local phase="discover"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --complete) phase="complete"; shift ;;
+      *)          spec_name="$1"; shift ;;
+    esac
+  done
 
   if [ -z "$spec_name" ]; then
     echo ""
-    print_err "Usage: rig-spec plan <spec-name>"
+    print_err "Usage: rig-spec plan <spec-name> [--complete]"
+    echo ""
+    echo "  Phase 1 (default): agent asks planning questions before creating tasks"
+    echo "  Phase 2: rig-spec plan <spec-name> --complete  (after saving Q&A)"
     echo ""
     echo "  Available specs:"
     find "$RIG_DIR/feedforward/specs" -name "*.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | \
@@ -4533,20 +4862,86 @@ cmd_plan() {
     exit 1
   fi
 
+  # Normalize: allow "allow-multiple-consultations" or path-like input
+  spec_name=$(basename "$spec_name" .spec.md)
+
   local spec_file="$RIG_DIR/feedforward/specs/${spec_name}.spec.md"
   if [ ! -f "$spec_file" ]; then
     print_err "Spec not found: $spec_file"
+    echo ""
+    echo "  rig-spec plan runs AFTER the spec exists. Create it first:"
+    echo ""
+    echo "    rig-spec shape \"$spec_name\""
+    echo ""
+    echo "  Then edit the spec (acceptance criteria, fixtures), then:"
+    echo ""
+    echo "    rig-spec plan $spec_name"
+    echo ""
+    local available
+    available=$(find "$RIG_DIR/feedforward/specs" -name "*.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
+    if [ -n "$available" ]; then
+      echo "  Specs in this project:"
+      while IFS= read -r f; do
+        echo "    $(basename "$f" .spec.md)"
+      done <<< "$available"
+      echo ""
+    fi
     exit 1
   fi
 
   local tasks_dir="$RIG_DIR/feedforward/tasks/${spec_name}"
   mkdir -p "$tasks_dir"
 
+  local qa_file
+  qa_file=$(plan_qa_path "$spec_name")
+
+  if [ "$phase" = "complete" ]; then
+    cmd_plan_complete "$spec_name" "$spec_file" "$tasks_dir" "$qa_file"
+    return
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec plan — $spec_name${RESET} ${DIM}(phase 1: discover)${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if [ ! -f "$qa_file" ]; then
+    cat > "$qa_file" << EOF
+# Plan Q&A: $spec_name
+
+> Phase 1: paste the agent's planning questions below, then your answers.
+> Phase 2: run \`rig-spec plan $spec_name --complete\` after this file is filled.
+
+## Agent questions (paste from chat)
+
+1.
+2.
+3.
+
+## Human answers
+
+1.
+2.
+3.
+
+## Task breakdown notes (optional)
+
+- Suggested order:
+- Parallel work:
+- Risks:
+
+EOF
+    print_ok "Q&A template: $qa_file"
+  fi
+
   local context_file="$RIG_DIR/context-plan-${spec_name}.md"
   {
-    echo "# Plan Tasks: $spec_name"
+    echo "# Plan tasks (phase 1 — discover): $spec_name"
     echo ""
-    echo "> Read everything below, then create the task breakdown."
+    echo "> **STOP — read before acting.**"
+    echo "> This is **phase 1**. Your ONLY job is to ask planning questions."
+    echo "> Do **NOT** create task or sensor files. Do **NOT** use \`## File:\` blocks."
+    echo "> Human saves Q&A to \`$qa_file\`, then runs \`rig-spec plan $spec_name --complete\`."
     echo ""
     echo "---"
     echo ""
@@ -4556,6 +4951,87 @@ cmd_plan() {
     echo ""
     echo "---"
     echo ""
+    echo "## Feature Spec"
+    echo ""
+    cat "$spec_file"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Your Instructions (phase 1)"
+    echo ""
+    echo "Ask **6–10 numbered questions** before breaking the spec into tasks."
+    echo ""
+    echo "Cover:"
+    echo "- Proposed task boundaries and execution order"
+    echo "- What can run in parallel vs must be sequential"
+    echo "- File ownership / areas of the codebase touched"
+    echo "- Testing strategy per area (unit, integration, e2e, manual)"
+    echo "- Sensors and validators needed (see STANDARDS.md)"
+    echo "- Dependencies on other features or external systems"
+    echo "- Risks, spikes, or tasks that need human review first"
+    echo "- Anything ambiguous in the spec that affects task split"
+    echo ""
+    echo "End with: save answers to \`$qa_file\` then \`rig-spec plan $spec_name --complete\`"
+    echo ""
+    echo "**Forbidden:** task files, sensor files, \`## File:\` output"
+
+  } > "$context_file"
+
+  print_ok "Tasks folder: $tasks_dir"
+  print_ok "Context assembled: $context_file"
+  echo ""
+  echo "  1. cat $context_file  → paste into agent"
+  echo "  2. Save Q&A to: $qa_file"
+  echo "  3. rig-spec plan $spec_name --complete"
+  echo ""
+}
+
+cmd_plan_complete() {
+  local spec_name="$1"
+  local spec_file="$2"
+  local tasks_dir="$3"
+  local qa_file="$4"
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec plan — $spec_name${RESET} ${DIM}(phase 2: complete)${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if [ ! -f "$qa_file" ]; then
+    print_warn "Q&A file not found: $qa_file"
+    read -r -p "  Continue without Q&A? [y/N] " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      exit 1
+    fi
+  fi
+
+  local plan_ts
+  plan_ts=$(task_ts_prefix)
+
+  local context_file="$RIG_DIR/context-plan-${spec_name}-complete.md"
+  {
+    echo "# Plan Tasks (phase 2): $spec_name"
+    echo ""
+    echo "> Q&A done. Create the task breakdown and sensors."
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Project Overview"
+    echo ""
+    cat "$RIG_DIR/HARNESS.md"
+    echo ""
+    echo "---"
+    echo ""
+
+    if [ -f "$qa_file" ]; then
+      echo "## Plan Q&A"
+      echo ""
+      cat "$qa_file"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+
     echo "## Feature Spec"
     echo ""
     cat "$spec_file"
@@ -4581,17 +5057,21 @@ cmd_plan() {
     echo "Output format — required:"
     echo "Output each task file AND its sensors using this exact structure:"
     echo ""
-    echo "  ## File: $tasks_dir/task-01-[name].task.md"
+    echo "  ## File: $tasks_dir/${plan_ts}-01-[name].task.md"
     echo "  \`\`\`markdown"
     echo "  [full task content here]"
     echo "  \`\`\`"
     echo ""
-    echo "  ## File: $tasks_dir/task-02-[name].task.md"
+    echo "  ## File: $tasks_dir/${plan_ts}-02-[name].task.md"
     echo "  \`\`\`markdown"
     echo "  [full task content here]"
     echo "  \`\`\`"
     echo ""
-    echo "File naming: task-01-[name].task.md, task-02-[name].task.md, ..."
+    echo "File naming (required): ${plan_ts}-[NN]-[slug].task.md"
+    echo "  - Use this plan timestamp prefix for ALL tasks: ${plan_ts}"
+    echo "  - NN = zero-padded order: 01, 02, 03..."
+    echo "  - Timestamp first so \`ls\` and \`rig-spec status\` stay in execution order"
+    echo "  - Run later with: rig-spec run 01-[slug] (partial id is enough)"
     echo ""
     echo "Standards — mandatory:"
     echo "- List applicable files under '## Standards to Follow' in each task (see STANDARDS.md)"
@@ -4625,6 +5105,7 @@ cmd_plan() {
 
   echo ""
   print_ok "Tasks folder created: $tasks_dir"
+  print_ok "Task name prefix for this plan: ${plan_ts}-[NN]-[slug].task.md"
   print_ok "Context assembled: $context_file"
   echo ""
   echo -e "  ${BOLD}Next steps:${RESET}"
@@ -4686,8 +5167,10 @@ cmd_help() {
   echo ""
   echo -e "${BOLD}Spec-driven:${RESET}"
   echo "  research <topic>     Create a research file in memory/research/"
-  echo "  shape <feature>      Create a spec from the template"
-  echo "  plan <spec-name>     Create task structure from a spec"
+  echo "  shape <feature>      Phase 1: CLI questions + agent clarifying questions"
+  echo "  shape <feature> --complete   Phase 2: agent writes full spec (after Q&A file)"
+  echo "  plan <spec-name>     Phase 1: agent planning questions before tasks"
+  echo "  plan <spec-name> --complete  Phase 2: agent creates tasks + sensors"
   echo ""
   echo -e "${BOLD}Other:${RESET}"
   echo "  version              Show version"

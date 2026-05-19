@@ -137,19 +137,23 @@ Implement → read spec + tasks + research findings (clean context)
 
 **Purpose:** Create a spec for a feature or piece of work.
 
-**Command:**
+**Commands (two phases):**
 ```bash
+# Phase 1 — discover (agent asks questions only; no full spec yet)
 rig-spec shape "notification system"
-
-# Or provide context upfront
 rig-spec shape "notification system" --from prd.md
+
+# Save Q&A to .rig/memory/shape-qa/notification-system.md
+
+# Phase 2 — complete spec
+rig-spec shape "notification system" --complete
 ```
 
 **What happens:**
-1. The agent reads any existing research findings in `memory/research/`
-2. Asks clarifying questions about the feature (or reads the PRD)
-3. Validates spec completeness before writing (inferential sensor)
-4. A structured spec file is generated
+1. CLI asks 8 questions; a draft spec is saved from your answers
+2. Phase 1 context instructs the agent to ask 8–12 clarifying questions (not write the spec)
+3. You answer in chat and save Q&A to `memory/shape-qa/<slug>.md`
+4. Phase 2 context includes Q&A; agent outputs the full spec file
 
 **Output:**
 ```
@@ -196,17 +200,19 @@ Deliver real-time and async notifications across email and in-app channels.
 
 **Purpose:** Break the spec into ordered, executable tasks.
 
-**Command:**
+**Commands (two phases):**
 ```bash
 rig-spec plan notification-system
+# → agent asks planning questions; save Q&A to memory/plan-qa/
+
+rig-spec plan notification-system --complete
+# → agent creates task + sensor files
 ```
 
 **What happens:**
-1. The agent reads the spec
-2. Analyzes dependencies between pieces of work
-3. Identifies what can run in parallel vs. sequentially
-4. Assigns file ownership to each task (prevents Parallel Task Conflicts)
-5. Generates individual task files with full context and contracts
+1. Phase 1: agent asks about task boundaries, parallelism, testing, risks
+2. You save answers to `memory/plan-qa/<spec>.md`
+3. Phase 2: agent reads spec + Q&A and generates task files with contracts and sensors
 
 **Output:**
 ```
@@ -530,8 +536,10 @@ Installs the `rig-spec` command to `~/.local/bin/`. No runtime required. Works o
 | `rig-spec audit` | Run continuous drift sensors, save report |
 | `rig-spec run <task-id>` | Assemble and print full task context for the agent |
 | `rig-spec research <topic>` | Create a research file in `memory/research/` |
-| `rig-spec shape <feature>` | Ask 5 questions, pre-fill spec, assemble context for agent |
-| `rig-spec plan <spec-name>` | Create task structure from a spec |
+| `rig-spec shape <feature>` | Phase 1: CLI + agent clarifying questions |
+| `rig-spec shape <feature> --complete` | Phase 2: agent writes full spec |
+| `rig-spec plan <spec-name>` | Phase 1: agent planning questions |
+| `rig-spec plan <spec-name> --complete` | Phase 2: create tasks + sensors |
 | `rig-spec version` | Show installed version |
 
 > `run`, `research`, `shape`, and `plan` are **context assemblers** — they prepare and print the context so you can paste it into your AI agent of choice. No API calls are made.

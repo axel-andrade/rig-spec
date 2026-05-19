@@ -174,41 +174,41 @@ Uma spec é um documento que define o que vai ser construído antes de qualquer 
 rig-spec shape "sistema de notificações"
 ```
 
-O comando vai fazer 5 perguntas:
+O comando faz **8 perguntas no terminal** (problema, usuários, objetivo, fora de escopo, restrições, fluxos, edge cases, critérios de sucesso). Você pode pular com Enter, mas o agente vai perguntar de novo no chat.
 
-```
-1. Qual problema isso resolve?
-   → Usuários não sabem quando eventos importantes acontecem
+**Fluxo em duas fases (spec mais rica):**
 
-2. Quem são os usuários?
-   → Usuários logados na plataforma
+| Fase | Comando | O que o agente faz |
+|------|---------|-------------------|
+| 1 — descobrir | `rig-spec shape "…"` | Só faz **perguntas** (8–12). Não escreve a spec ainda. |
+| 2 — completar | `rig-spec shape "…" --complete` | Escreve a spec completa com base nas respostas |
 
-3. Qual é o objetivo principal?
-   → Notificar em tempo real via WebSocket e por email
+**O que acontece na fase 1:**
 
-4. O que está fora do escopo?
-   → Push notifications mobile
+1. Rascunho da spec em `.rig/feedforward/specs/sistema-de-notificacoes.spec.md` (só com suas respostas do terminal)
+2. Contexto em `.rig/context-shape-sistema-de-notificacoes.md` — instrui o agente a **perguntar**, não a preencher tudo
+3. Template de Q&A em `.rig/memory/shape-qa/sistema-de-notificacoes.md`
 
-5. Alguma restrição ou decisão de design?
-   → Usar o servidor WebSocket já existente
-```
-
-**O que acontece depois:**
-
-1. Uma spec pré-preenchida é criada em `.rig/feedforward/specs/sistema-de-notificacoes.spec.md`
-2. Um arquivo de contexto é gerado em `.rig/context-shape-sistema-de-notificacoes.md`
-
-**Próximos passos:**
-
-1. Abra a spec e preencha a seção **Approved Fixtures** — são os exemplos de entrada/saída esperados que você define. Isso é obrigatório e só você pode fazer.
-
-2. Cole o conteúdo do contexto no seu agente:
+**Próximos passos (fase 1):**
 
 ```bash
 cat .rig/context-shape-sistema-de-notificacoes.md
 ```
 
-O agente vai completar as User Stories e os Critérios de Aceite com base nas suas respostas.
+Cole no chat. O agente devolve perguntas numeradas. Responda no chat e copie perguntas + respostas para:
+
+`.rig/memory/shape-qa/sistema-de-notificacoes.md`
+
+**Fase 2 — spec completa:**
+
+```bash
+rig-spec shape "sistema de notificações" --complete
+cat .rig/context-shape-sistema-de-notificacoes-complete.md
+```
+
+Cole no agente. Agora ele gera a spec com User Stories, critérios de aceite, etc.
+
+Depois, preencha **Approved Fixtures** na spec (só você define entrada/saída esperada).
 
 > **Por que eu preciso preencher os Approved Fixtures?**
 > Porque eles definem o que "funcionando corretamente" significa. O agente nunca inventa isso — é você quem decide. Exemplo:
@@ -220,13 +220,23 @@ O agente vai completar as User Stories e os Critérios de Aceite com base nas su
 
 ### 5. Dividir em tasks
 
-Com a spec pronta, quebre em tasks menores:
+Com a spec pronta, quebre em tasks — também em **duas fases**:
 
 ```bash
+# Fase 1: agente pergunta sobre ordem, paralelismo, testes, riscos
 rig-spec plan sistema-de-notificacoes
+cat .rig/context-plan-sistema-de-notificacoes.md
 ```
 
-Isso monta um contexto em `.rig/context-plan-sistema-de-notificacoes.md`. Cole no seu agente — ele vai criar os arquivos de task em `.rig/feedforward/tasks/sistema-de-notificacoes/`.
+Salve Q&A em `.rig/memory/plan-qa/sistema-de-notificacoes.md`, depois:
+
+```bash
+# Fase 2: agente cria os arquivos de task
+rig-spec plan sistema-de-notificacoes --complete
+cat .rig/context-plan-sistema-de-notificacoes-complete.md
+```
+
+As tasks ficam em `.rig/feedforward/tasks/sistema-de-notificacoes/`.
 
 Cada task vai ter:
 - O que construir
@@ -234,6 +244,32 @@ Cada task vai ter:
 - Ownership de arquivos (qual task pode tocar qual arquivo)
 - Dependências entre tasks
 - Contrato — checklist do que significa "pronto"
+
+**Nome dos arquivos de task (ordem automática):**
+
+O `rig-spec plan` gera um prefixo com data/hora. Use este padrão:
+
+```
+20260519-143052-01-dependencies.task.md
+20260519-143052-02-data-layer.task.md
+20260519-143052-03-ui-layer.task.md
+```
+
+O timestamp na frente faz o `ls` e o `rig-spec done` respeitarem a ordem de execução. Para rodar, use o trecho único **se só existir uma task com esse nome no projeto**:
+
+```bash
+rig-spec run 01-dependencies
+```
+
+Se duas features tiverem `01-data-layer`, o rig-spec **não adivinha** — ele lista as opções e pede o id qualificado:
+
+```bash
+rig-spec run allow-multiple-consultations/01-data-layer
+# ou
+rig-spec run outra-feature/01-data-layer
+```
+
+Com **Active Feature** definida no `HARNESS.md`, um fragmento ambíguo pode ser resolvido automaticamente para a feature ativa.
 
 ---
 
@@ -416,11 +452,20 @@ Ferramentas de chat não leem seus arquivos locais — elas não conseguem criar
 **Para criar uma spec (`shape`):**
 
 ```bash
+# Fase 1 — perguntas (não gera spec completa ainda)
 rig-spec shape "nome da feature"
 cat .rig/context-shape-nome-da-feature.md
 ```
 
-Cole no chat. O agente vai responder com um bloco assim:
+Responda no chat → salve em `.rig/memory/shape-qa/nome-da-feature.md`
+
+```bash
+# Fase 2 — spec completa
+rig-spec shape "nome da feature" --complete
+cat .rig/context-shape-nome-da-feature-complete.md
+```
+
+O agente responde com:
 
 ```
 ## File: .rig/feedforward/specs/nome-da-feature.spec.md
@@ -429,8 +474,6 @@ Cole no chat. O agente vai responder com um bloco assim:
 ...conteúdo completo...
 ```
 ```
-
-Você copia esse conteúdo e salva no arquivo mostrado.
 
 ---
 
@@ -441,7 +484,14 @@ rig-spec plan nome-da-feature
 cat .rig/context-plan-nome-da-feature.md
 ```
 
-Cole no chat. O agente vai responder com um bloco por task:
+Fase 1: só perguntas. Salve Q&A em `.rig/memory/plan-qa/nome-da-feature.md`
+
+```bash
+rig-spec plan nome-da-feature --complete
+cat .rig/context-plan-nome-da-feature-complete.md
+```
+
+Fase 2: o agente responde com um bloco por task:
 
 ```
 ## File: .rig/feedforward/tasks/nome-da-feature/task-01-xxx.task.md
@@ -500,8 +550,10 @@ Copie o output e cole no chat. O agente reconstrói o contexto completo.
 | Comando | Arquivo gerado | Quando usar |
 |---|---|---|
 | `rig-spec run task-01` | `.rig/context-task-01.md` | Para implementar uma task |
-| `rig-spec shape "feature"` | `.rig/context-shape-[slug].md` | Para criar uma spec |
-| `rig-spec plan feature` | `.rig/context-plan-[slug].md` | Para criar tasks a partir de uma spec |
+| `rig-spec shape "feature"` | `.rig/context-shape-[slug].md` | Fase 1: agente faz perguntas |
+| `rig-spec shape "feature" --complete` | `.rig/context-shape-[slug]-complete.md` | Fase 2: spec completa |
+| `rig-spec plan feature` | `.rig/context-plan-[slug].md` | Fase 1: perguntas de planejamento |
+| `rig-spec plan feature --complete` | `.rig/context-plan-[slug]-complete.md` | Fase 2: criar tasks |
 | `rig-spec resume` | (imprime direto) | Para retomar onde parou |
 
 Os arquivos `context-*.md` são temporários e estão no `.rig/.gitignore` — não vão para o repositório.
