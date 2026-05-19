@@ -301,7 +301,7 @@ Then run `rig-spec resume` — the next agent starts with a clean context window
 
 ### Step 7 — `validate`
 
-**Purpose:** Verify the implementation against the contract and sensors.
+**Purpose:** Verify the implementation against the contract, sensors, and project standards (via review).
 
 **Run after every `run`, once the agent has finished:**
 ```bash
@@ -310,7 +310,11 @@ rig-spec validate task-01
 
 **What happens:**
 
-`rig-spec validate` reads every `*.sensor.md` file in `.rig/feedback/sensors/`, extracts the `## Command` block, runs it, and reports pass/fail.
+1. Prints the task **contract checklist**
+2. Runs every **computational** sensor in `.rig/feedback/sensors/`
+3. Marks **inferential** sensors (`standards-compliance`, `spec-compliance`) as `REVIEW`
+4. Writes a **validation report** to `.rig/feedback/reports/validation-task-01-YYYY-MM-DD.md` with a sensor matrix table
+5. Tells you to run the **review agent** with `code-review.review.md`, `validation-matrix.review.md`, and applicable `feedforward/rules/`
 
 #### Which sensors are active
 

@@ -158,23 +158,38 @@ Run `rig-spec overview` to inspect it in a clean one-pager without opening the f
 
 ## The Standards System
 
-Standards capture how your project is built — patterns, conventions, and architectural decisions — and enforce them automatically on every implementation.
+Standards capture how your project is built — patterns, conventions, and architectural decisions — and enforce them on every implementation.
 
-**The principle:** standards are feedforward. Compliance sensors are feedback.
+**Entry point:** `.rig/STANDARDS.md` — single index of where each concern lives.
+
+**The principle:** standards are feedforward. Compliance sensors and review are feedback.
 
 ### What Standards Cover
 
 ```
-.rig/feedforward/rules/
-├── architecture.rules.md    ← module boundaries, layering rules, dependency direction
-├── naming.rules.md          ← file naming, class naming, function naming, variable naming
-├── structure.rules.md       ← folder organization, where each type of file lives
-├── component.rules.md       ← frontend component patterns, props conventions, state rules
-├── api.rules.md             ← endpoint design, response envelope, error format, versioning
-└── testing.rules.md         ← what must be tested, fixture requirements, test file location
+.rig/
+├── STANDARDS.md                 ← index (read first)
+└── feedforward/rules/
+    ├── architecture.rules.md    ← module boundaries, layering, dependency direction
+    ├── naming.rules.md          ← files, classes, functions, variables
+    ├── structure.rules.md       ← folder organization
+    ├── component.rules.md       ← React/UI patterns (frontend)
+    ├── design-tokens.rules.md   ← colors, typography, spacing (frontend)
+    ├── api.rules.md             ← endpoints, envelopes, errors
+    └── testing.rules.md         ← coverage, fixtures, test location
 ```
 
-Every rules file is injected into the agent's context before every task. The agent knows how your project is built before writing a single line of code.
+Every existing `*.rules.md` file is injected on `rig-spec run`. Tasks should list applicable rules under `## Standards to Follow`.
+
+### Automatic skill routing
+
+`feedforward/skills.registry.md` defines keyword → skill mappings. `rig-spec run` merges:
+
+1. Skills matched from task text (registry)
+2. Skills listed explicitly in the task file
+3. Optional external skills (`~/.claude/skills/...`) when the file exists
+
+This lets a backend planning task pull FastAPI/security skills without hand-editing every task.
 
 ### Standards Compliance Sensors
 
@@ -196,21 +211,21 @@ Standards files define expectations. Sensors verify they were met.
 
 The inferential sensor catches violations that linters cannot: wrong layer for business logic, component in the wrong folder, API response that doesn't follow the project envelope, test that doesn't cover the required scenarios.
 
-### Discover — For Existing Projects
+### Validation reports
 
-`rig-spec discover` analyzes an existing codebase and generates draft standards:
+`rig-spec validate [task-id]` writes `feedback/reports/validation-*.md` with a sensor matrix, contract checklist, and review instructions. Inferential sensors show as `REVIEW` — complete them with the review agent using `code-review.review.md` and `validation-matrix.review.md`.
 
-```bash
-rig-spec discover
-```
+### Retrofit — For Existing Projects
+
+`rig-spec init --retrofit` analyzes the codebase and generates draft standards:
 
 **Process:**
-1. Scans folder structure, file naming patterns, import graphs, class/component shapes
-2. Generates draft files in `.rig/feedforward/rules/` — every item marked `[DRAFT]`
-3. Human reviews each draft: confirm what's intentional, remove what's accidental, add what's missing
-4. Approved rules become active feedforward context and configure compliance sensors automatically
+1. Scans folder structure from `src/`, `app/`, or `lib/`
+2. Generates `structure.rules.md` from the real tree; other rules as `[DRAFT]`
+3. Creates `STANDARDS.md` as the index
+4. Human reviews each draft: confirm what's intentional, remove accidents, add missing rules
 
-**Why human review is non-negotiable:** discovered patterns may be accidents or legacy debt, not architectural intent. Only humans can decide what's a rule vs. what's a mistake.
+**Why human review is non-negotiable:** discovered patterns may be accidents or legacy debt, not architectural intent.
 
 ### Init — For New Projects
 

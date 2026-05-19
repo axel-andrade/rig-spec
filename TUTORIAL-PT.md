@@ -135,15 +135,18 @@ Depois do init, sua pasta `.rig/` vai ter essa estrutura:
 ```
 .rig/
 ├── HARNESS.md                  ← todo agente lê isso primeiro
+├── STANDARDS.md                ← índice: onde está cada padrão do projeto
 ├── feedforward/
 │   ├── specs/                  ← onde ficam as specs das features
 │   ├── tasks/                  ← onde ficam as tasks
-│   ├── rules/                  ← regras de arquitetura, naming, API, testes
+│   ├── rules/                  ← arquitetura, naming, API, UI, testes
+│   ├── skills.registry.md      ← roteamento automático de skills por palavra-chave
 │   ├── skills/                 ← contexto especializado (TypeScript, FastAPI...)
 │   └── mcp.config.md           ← servidores MCP (opcional)
 ├── feedback/
-│   ├── sensors/                ← linters, testes, typecheckers
-│   ├── review/                 ← instruções para o agente revisor
+│   ├── sensors/                ← linters, testes, endpoints, compliance
+│   ├── reports/                ← relatórios visuais do validate
+│   ├── review/                 ← skills de review (sempre no validate)
 │   └── audit/                  ← sensores contínuos de drift
 ├── memory/
 │   ├── progress.md             ← o que foi feito, o que falta
@@ -241,12 +244,16 @@ rig-spec run task-01
 ```
 
 O comando monta o contexto completo em `.rig/context-task-01.md` com:
+- **STANDARDS.md** — índice dos padrões
 - Visão geral do projeto (HARNESS.md)
 - Estado atual (progress.md)
 - A spec da feature
-- A task específica
-- As regras do projeto (rules/)
-- As skills relevantes
+- Todas as regras em `feedforward/rules/` (arquitetura, naming, API, tokens de UI…)
+- **Skills automáticas** — `skills.registry.md` detecta backend/frontend/testes pelas palavras da task
+- Skills explícitas listadas na task
+- A task específica e o contrato
+
+**Roteamento de skills:** edite `.rig/feedforward/skills.registry.md` para mapear palavras-chave → skills locais ou externas (`~/.claude/skills/...`). Exemplo: task com "endpoint" e "service" carrega a skill de Node/FastAPI automaticamente.
 
 Cole no agente:
 
@@ -286,7 +293,17 @@ Para ver os resultados junto com o contrato de uma task específica:
 rig-spec validate task-01
 ```
 
-**Se algum sensor falhar:**
+**Artefato visual:** o comando gera `.rig/feedback/reports/validation-task-01-AAAA-MM-DD.md` com:
+
+- Tabela **Sensor matrix** (PASS / FAIL / REVIEW por sensor)
+- Checklist do **contrato** da task
+- Instruções para o **agente de review** (`code-review.review.md` + `validation-matrix.review.md` + `STANDARDS.md`)
+
+Sensores **inferenciais** (`standards-compliance`, `spec-compliance`) aparecem como `REVIEW` — o CLI não marca PASS sozinho. Rode um agente revisor com o relatório e as regras em `feedforward/rules/`.
+
+**Padrões do projeto:** antes de implementar, o agente deve ler `.rig/STANDARDS.md` e os `*.rules.md` aplicáveis (arquitetura, naming, API, `design-tokens.rules.md` para front).
+
+**Se algum sensor computacional falhar:**
 
 O agente recebe a lista de falhas específicas e corrige. Você roda `rig-spec validate` novamente até tudo passar.
 
@@ -547,6 +564,46 @@ São arquivos de contexto especializado. Exemplos gerados automaticamente:
 - `nextjs.skill.md` — App Router, Server Components, Server Actions
 
 Você pode criar skills para qualquer tecnologia ou domínio específico do seu projeto. Copie `_TEMPLATE.skill.md` e preencha.
+
+---
+
+## Padrões do projeto (onde colocar o quê)
+
+| Tipo de informação | Arquivo |
+|---|---|
+| Índice geral | `.rig/STANDARDS.md` |
+| Arquitetura / camadas | `feedforward/rules/architecture.rules.md` |
+| Nomes de arquivos e símbolos | `feedforward/rules/naming.rules.md` |
+| Pastas e módulos | `feedforward/rules/structure.rules.md` |
+| API REST/GraphQL | `feedforward/rules/api.rules.md` |
+| Testes | `feedforward/rules/testing.rules.md` |
+| Componentes React | `feedforward/rules/component.rules.md` |
+| Cores, tipografia, spacing | `feedforward/rules/design-tokens.rules.md` |
+
+No **retrofit**, `structure.rules.md` já nasce preenchido com a árvore real do `src/`. O restante fica `[DRAFT]` até você documentar os padrões reais do time.
+
+Em **cada task**, liste em `## Standards to Follow` quais arquivos de regra se aplicam.
+
+---
+
+## Skills automáticas
+
+Edite `.rig/feedforward/skills.registry.md`:
+
+```markdown
+| Domain | Skill path | Match keywords |
+| backend | `feedforward/skills/nodejs.skill.md` | service, api, endpoint |
+```
+
+Skills externas (instaladas no sistema):
+
+```markdown
+| security | `~/.claude/skills/cc-skill-security-review/SKILL.md` | auth, jwt, password |
+```
+
+No `rig-spec run`, skills locais e externas (se o arquivo existir) entram no contexto automaticamente.
+
+Para desligar o roteamento em uma task: `skills: manual`
 
 ---
 
@@ -814,8 +871,8 @@ Tudo bem. O Caminho 1 (agente único, você valida) funciona perfeitamente. Os p
 | `rig-spec shape "feature"` | Faz 5 perguntas, cria spec, monta contexto para o agente completar |
 | `rig-spec plan <spec>` | Monta contexto para o agente criar as tasks |
 | `rig-spec run <task-id>` | Monta contexto completo para o agente implementar |
-| `rig-spec validate` | Roda todos os sensores |
-| `rig-spec validate <task-id>` | Sensores + mostra checklist do contrato da task |
+| `rig-spec validate` | Roda sensores + gera relatório em `feedback/reports/` |
+| `rig-spec validate <task-id>` | Sensores + contrato + relatório com matriz de validação |
 | `rig-spec done <task-id>` | Marca task como concluída, atualiza progress.md, sugere commit git |
 | `rig-spec resume` | Imprime contexto completo para retomar sessão (inclui learnings e checkpoint) |
 | `rig-spec status` | Mostra progresso: feature ativa, tasks, última sessão |

@@ -3,7 +3,7 @@
 # https://github.com/axel-andrade/rig-spec
 set -e
 
-RIGSPEC_VERSION="1.0.0"
+RIGSPEC_VERSION="1.1.0"
 RIG_DIR=".rig"
 REPO="https://github.com/axel-andrade/rig-spec"
 PROJECT_DESCRIPTION=""
@@ -53,6 +53,69 @@ extract_command() {
     in_block && /^```/ { exit }
     in_block { print }
   ' "$file"
+}
+
+# Returns inferential if sensor command contains INFERENTIAL or echo only placeholder
+sensor_is_inferential() {
+  local cmd="$1"
+  echo "$cmd" | grep -qE 'INFERENTIAL|echo "INFERENTIAL'
+}
+
+# Resolve skill paths for a task: registry keywords + explicit task skills (deduped)
+resolve_skills_for_task() {
+  local task_file="$1"
+  local registry="$RIG_DIR/feedforward/skills.registry.md"
+  local combined_text=""
+  local -a resolved=()
+
+  [ -f "$task_file" ] || return 0
+  combined_text=$(tr '[:upper:]' '[:lower:]' < "$task_file")
+
+  if [ -f "$registry" ] && ! echo "$combined_text" | grep -qE 'skills:[[:space:]]*manual'; then
+    while IFS='|' read -r _ col2 col3 _rest; do
+      col2=$(echo "$col2" | sed 's/^ *//;s/ *$//;s/`//g')
+      col3=$(echo "$col3" | sed 's/^ *//;s/ *$//' | tr '[:upper:]' '[:lower:]')
+      [ -z "$col2" ] && continue
+      echo "$col2" | grep -qiE 'skill path|external skill|domain' && continue
+      echo "$col2" | grep -q '^---' && continue
+
+      local hit=false
+      local kw
+      IFS=',' read -ra KWS <<< "$col3"
+      for kw in "${KWS[@]}"; do
+        kw=$(echo "$kw" | xargs)
+        [ -z "$kw" ] && continue
+        if echo "$combined_text" | grep -qF "$kw"; then
+          hit=true
+          break
+        fi
+      done
+
+      if $hit; then
+        local fp=""
+        if [[ "$col2" == feedforward/* ]]; then
+          fp="$RIG_DIR/$col2"
+        elif [[ "$col2" == "~/"* ]]; then
+          fp="${col2/#\~/$HOME}"
+        elif [[ "$col2" == /* ]]; then
+          fp="$col2"
+        fi
+        if [ -f "$fp" ]; then
+          resolved+=("$col2")
+        fi
+      fi
+    done < <(grep '^| ' "$registry" 2>/dev/null || true)
+  fi
+
+  while IFS= read -r skill_ref; do
+    [ "$skill_ref" = "feedforward/skills/_TEMPLATE.skill.md" ] && continue
+    [ -f "$RIG_DIR/$skill_ref" ] && resolved+=("$skill_ref")
+  done < <(grep -oE 'feedforward/skills/[^ `]+' "$task_file" 2>/dev/null || true)
+
+  if [ ${#resolved[@]} -eq 0 ]; then
+    return 0
+  fi
+  printf '%s\n' "${resolved[@]}" | awk '!seen[$0]++'
 }
 
 # ─────────────────────────────────────────────
@@ -341,15 +404,24 @@ Full instructions: \`memory/bootstrap.md\`
 $sensors_list
 ---
 
+## Project Standards
+
+→ **Start here:** \`STANDARDS.md\` — index of all \`feedforward/rules/\` and enforcement sensors.
+
+→ **Skill routing:** \`feedforward/skills.registry.md\` — auto-loads skills on \`rig-spec run\`.
+
 ## Key Files
 
 | File | Purpose |
 |---|---|
+| \`STANDARDS.md\` | Index: architecture, naming, UI tokens, API rules |
 | \`feedforward/specs/\` | Feature specifications |
 | \`feedforward/tasks/\` | Task breakdowns per spec |
 | \`feedforward/rules/\` | Coding conventions and architecture rules |
+| \`feedforward/skills.registry.md\` | Auto skill routing by task keywords |
 | \`feedforward/skills/\` | Specialized local knowledge |
 | \`feedback/sensors/\` | Automated validation commands |
+| \`feedback/reports/\` | Validation artifacts (\`rig-spec validate\`) |
 | \`memory/progress.md\` | Current state of all work |
 | \`memory/decisions.md\` | Architectural decisions |
 | \`memory/research/\` | Research session findings |
@@ -404,23 +476,27 @@ write_bootstrap_md() {
 → Read `.rig/HARNESS.md`
 What it answers: What is this project? Vision? Business rules? What level? What's active?
 
-### 2. Current State
+### 2. Project Standards (when exists)
+→ Read `.rig/STANDARDS.md` then applicable `.rig/feedforward/rules/*.rules.md`
+What it answers: Architecture, naming, API, UI tokens — patterns you must follow.
+
+### 3. Current State
 → Read `.rig/memory/progress.md`
 What it answers: What's done? What's next? Any blockers?
 
-### 3. Architectural Decisions (when exists)
+### 4. Architectural Decisions (when exists)
 → Read `.rig/memory/decisions.md`
 What it answers: Why are things the way they are? Do not re-debate decided issues.
 
-### 4. Research Findings (when relevant)
+### 5. Research Findings (when relevant)
 → Read `.rig/memory/research/[relevant-topic].md`
 What it answers: What was already investigated?
 
-### 5. Active Feature Spec (when in progress)
+### 6. Active Feature Spec (when in progress)
 → Read `.rig/feedforward/specs/[active-feature].spec.md`
 What it answers: What are we building? Acceptance criteria? Approved fixtures?
 
-### 6. Current Task (when in progress)
+### 7. Current Task (when in progress)
 → Read the next pending task in `.rig/feedforward/tasks/[feature]/`
 What it answers: What exactly to build? File ownership? Contract?
 
@@ -565,9 +641,31 @@ write_task_template() {
 
 ---
 
+## Standards to Follow
+
+> Read `.rig/STANDARDS.md` — list every `feedforward/rules/*.rules.md` that applies.
+
+- `feedforward/rules/architecture.rules.md`
+- `feedforward/rules/[other].rules.md`
+
+---
+
 ## Skills to Load
 
+> Listed skills are always loaded. `rig-spec run` also auto-matches `skills.registry.md` from task keywords.
+> To disable auto-routing, add a line: `skills: manual`
+
 - `feedforward/skills/[technology].skill.md`
+
+---
+
+## Sensors for This Task
+
+> Create or reference sensors in `feedback/sensors/`. `rig-spec validate` runs all configured sensors.
+
+- [ ] `test.sensor.md` ← unit/integration tests
+- [ ] `endpoint.sensor.md` ← if this task adds/changes API routes
+- [ ] `standards-compliance.sensor.md` ← inferential (review agent)
 
 ---
 
@@ -575,7 +673,8 @@ write_task_template() {
 
 - [ ] [Deliverable 1] ← verified by: [test / typecheck / validator]
 - [ ] [Deliverable 2] ← verified by: [test / typecheck / validator]
-- [ ] Approved fixtures from spec pass ← verified by: validator
+- [ ] Project standards followed per `STANDARDS.md` ← verified by: standards-compliance + review
+- [ ] Approved fixtures from spec pass ← verified by: spec-compliance + validator
 - [ ] No files outside file ownership were modified ← verified by: validator
 EOF
   print_ok "feedforward/tasks/_TEMPLATE.task.md created"
@@ -1562,6 +1661,26 @@ EOF
 ## Sensor
 
 Enforced by: `feedback/sensors/standards-compliance.sensor.md` (Level 3)
+EOF
+
+  cat > "$RIG_DIR/feedforward/rules/design-tokens.rules.md" << 'EOF'
+# Design Tokens — UI standards
+
+> [DRAFT] Fill in colors, typography, spacing. Point to real files: tailwind.config.ts, tokens.css.
+
+## Source of truth
+
+| Token type | Location |
+|---|---|
+| CSS variables | `[path]` |
+| Tailwind theme | `[path]` |
+
+## Rules
+
+- Do not hardcode hex in components — use theme tokens
+- Shared UI primitives: `components/ui/`
+
+Enforced by: `feedback/sensors/standards-compliance.sensor.md`
 EOF
 
   cat > "$RIG_DIR/feedforward/rules/api.rules.md" << 'EOF'
@@ -2660,6 +2779,147 @@ Only review files in the task's File Ownership list. Do not comment on code outs
 Return only what's listed above. No refactoring suggestions. No style opinions beyond what the rules define.
 EOF
   print_ok "feedback/review/code-review.review.md created"
+
+  cat > "$RIG_DIR/feedback/review/validation-matrix.review.md" << 'EOF'
+# Validation Matrix — Review protocol
+
+> Used by `rig-spec validate` after computational sensors run.
+
+Read: task contract, `.rig/STANDARDS.md`, applicable `feedforward/rules/`, linked spec, and `feedback/review/code-review.review.md`.
+
+Fill every row in the validation report matrix. Overall PASS only if every row is PASS or N/A.
+
+See template output in `feedback/reports/validation-*.md` generated by the CLI.
+EOF
+  print_ok "feedback/review/validation-matrix.review.md created"
+}
+
+write_standards_index() {
+  cat > "$RIG_DIR/STANDARDS.md" << 'EOF'
+# Project Standards — Index
+
+> Canonical map of where every project pattern lives.
+> Before implementing any task, read applicable `feedforward/rules/*.rules.md`.
+
+## Standards topology
+
+| Concern | File |
+|---|---|
+| Architecture, layering | `feedforward/rules/architecture.rules.md` |
+| Naming | `feedforward/rules/naming.rules.md` |
+| Folder layout | `feedforward/rules/structure.rules.md` |
+| API shape | `feedforward/rules/api.rules.md` |
+| Tests | `feedforward/rules/testing.rules.md` |
+| UI components | `feedforward/rules/component.rules.md` (if exists) |
+| Colors / tokens | `feedforward/rules/design-tokens.rules.md` (if exists) |
+
+## Enforcement
+
+| Check | File |
+|---|---|
+| Lint | `feedback/sensors/lint.sensor.md` |
+| Types | `feedback/sensors/typecheck.sensor.md` |
+| Tests | `feedback/sensors/test.sensor.md` |
+| API smoke | `feedback/sensors/endpoint.sensor.md` |
+| Spec match | `feedback/sensors/spec-compliance.sensor.md` |
+| Rules match | `feedback/sensors/standards-compliance.sensor.md` |
+| Review | `feedback/review/code-review.review.md` |
+
+Run: `rig-spec validate <task-id>` → report in `feedback/reports/`.
+
+Skill routing: `feedforward/skills.registry.md`
+EOF
+  print_ok "STANDARDS.md created"
+}
+
+write_skills_registry() {
+  local registry="$RIG_DIR/feedforward/skills.registry.md"
+  [ -f "$registry" ] && return
+
+  cat > "$registry" << 'EOF'
+# Skills Registry — Automatic routing
+
+> `rig-spec run` matches task text to keywords below and loads skills into context.
+> Add rows when you create new `feedforward/skills/*.skill.md` files.
+
+## Local skills
+
+| Domain | Skill path | Match keywords |
+|---|---|---|
+| typescript | `feedforward/skills/typescript.skill.md` | typescript, ts, interface, dto |
+| backend | `feedforward/skills/nodejs.skill.md` | service, repository, controller, api, endpoint, backend |
+| python | `feedforward/skills/python.skill.md` | python, fastapi, pydantic, pytest |
+| fastapi | `feedforward/skills/fastapi.skill.md` | fastapi, router, dependency |
+| frontend | `feedforward/skills/react.skill.md` | react, component, hook, jsx, page |
+| nextjs | `feedforward/skills/nextjs.skill.md` | nextjs, app router, server component, route |
+| testing | `feedforward/skills/testing.skill.md` | test, spec, fixture, mock, e2e |
+
+## External skills (optional — uncomment paths)
+
+| Domain | External skill | Match keywords |
+|---|---|---|
+| security | `~/.claude/skills/cc-skill-security-review/SKILL.md` | auth, login, password, token, jwt |
+| api-design | `~/.claude/skills/api-design-principles/SKILL.md` | rest, openapi, graphql |
+EOF
+  print_ok "feedforward/skills.registry.md created"
+}
+
+write_compliance_sensor_templates() {
+  local d="$RIG_DIR/feedback/sensors"
+  if [ ! -f "$d/standards-compliance.sensor.md" ]; then
+    cat > "$d/standards-compliance.sensor.md" << 'EOF'
+# Sensor: Standards Compliance
+
+> Type: Inferential | Timing: After every task
+
+## Command
+
+```bash
+echo "INFERENTIAL: review agent — read feedforward/rules/ per STANDARDS.md"
+```
+
+## Pass Condition
+
+Review agent: Standards Compliance PASS in validation report.
+EOF
+  fi
+  if [ ! -f "$d/spec-compliance.sensor.md" ]; then
+    cat > "$d/spec-compliance.sensor.md" << 'EOF'
+# Sensor: Spec Compliance
+
+> Type: Inferential | Timing: After every task
+
+## Command
+
+```bash
+echo "INFERENTIAL: review agent — compare implementation to linked spec"
+```
+
+## Pass Condition
+
+Review agent: Spec compliance PASS; all in-scope acceptance criteria and fixtures satisfied.
+EOF
+  fi
+  if [ ! -f "$d/endpoint.sensor.md" ]; then
+    cat > "$d/endpoint.sensor.md" << 'EOF'
+# Sensor: API Endpoint Smoke
+
+> Type: Computational | Timing: Tasks that change HTTP endpoints
+
+## Command
+
+```bash
+# Configure: npm test -- --testPathPattern=api || pytest -q -k api
+# Until configured, this sensor is skipped (not failed)
+echo "SKIP: configure endpoint.sensor.md with your API test command"
+```
+
+## Pass Condition
+
+Exit code 0, or SKIP while command contains "SKIP:" and is not yet configured.
+EOF
+  fi
+  print_ok "Compliance sensor templates (standards, spec, endpoint)"
 }
 
 write_audit_templates() {
@@ -2949,6 +3209,7 @@ cmd_init() {
   mkdir -p "$RIG_DIR/feedforward/skills"
   mkdir -p "$RIG_DIR/feedback/sensors"
   mkdir -p "$RIG_DIR/feedback/review"
+  mkdir -p "$RIG_DIR/feedback/reports"
   mkdir -p "$RIG_DIR/feedback/audit"
   mkdir -p "$RIG_DIR/memory/research"
   mkdir -p "$RIG_DIR/orchestration/contracts"
@@ -2969,6 +3230,9 @@ cmd_init() {
   write_research_template
   write_orchestration_profiles
   write_review_template
+  write_standards_index
+  write_skills_registry
+  write_compliance_sensor_templates
   write_audit_templates
   write_sensor_generic_template
   write_sensor_templates
@@ -3217,7 +3481,10 @@ cmd_validate() {
 
   local passed=0
   local failed=0
+  local skipped=0
+  local review_pending=0
   local errors=()
+  local -a report_rows=()
 
   while IFS= read -r sensor_file; do
     local sensor_name
@@ -3227,15 +3494,33 @@ cmd_validate() {
 
     if [ -z "$cmd" ]; then
       print_warn "$sensor_name — no command found in sensor file"
+      report_rows+=("| $sensor_name | SKIP | no command |")
+      ((skipped++)) || true
+      continue
+    fi
+
+    if echo "$cmd" | grep -q 'SKIP:'; then
+      print_warn "$sensor_name — skipped (configure sensor command)"
+      report_rows+=("| $sensor_name | SKIP | not configured |")
+      ((skipped++)) || true
+      continue
+    fi
+
+    if sensor_is_inferential "$cmd"; then
+      echo -e "  ${BOLD}$sensor_name${RESET} ... ${YELLOW}REVIEW${RESET} (inferential — use review agent)"
+      report_rows+=("| $sensor_name | REVIEW | inferential |")
+      ((review_pending++)) || true
       continue
     fi
 
     echo -ne "  Running ${BOLD}$sensor_name${RESET}... "
     if eval "$cmd" > /tmp/rig-sensor-output 2>&1; then
       echo -e "${GREEN}PASS${RESET}"
+      report_rows+=("| $sensor_name | PASS | computational |")
       ((passed++)) || true
     else
       echo -e "${RED}FAIL${RESET}"
+      report_rows+=("| $sensor_name | FAIL | computational |")
       ((failed++)) || true
       errors+=("$sensor_name")
       echo ""
@@ -3247,9 +3532,64 @@ cmd_validate() {
     fi
   done <<< "$sensor_files"
 
+  # Validation report artifact
+  mkdir -p "$RIG_DIR/feedback/reports"
+  local report_slug="${task_id:-all}-$(today)"
+  local report_file="$RIG_DIR/feedback/reports/validation-${report_slug}.md"
+  {
+    echo "# Validation Report — ${task_id:-all tasks}"
+    echo ""
+    echo "**Date:** $(today)"
+    echo "**Computational:** $passed passed, $failed failed, $skipped skipped"
+    echo "**Inferential:** $review_pending pending review"
+    echo ""
+    echo "## Sensor matrix"
+    echo ""
+    echo "| Sensor | Result | Type |"
+    echo "|---|---|---|"
+    for row in "${report_rows[@]}"; do
+      echo "$row"
+    done
+    echo ""
+    if [ -n "$task_file" ] && grep -q "^## Contract" "$task_file" 2>/dev/null; then
+      echo "## Contract checklist"
+      echo ""
+      awk '/^## Contract/{p=1; next} p && /^---/{exit} p && /^- \[/{print}' "$task_file"
+      echo ""
+    fi
+    echo "## Review required (always)"
+    echo ""
+    echo "Run a **review agent** with these files:"
+    echo "- \`feedback/review/code-review.review.md\`"
+    echo "- \`feedback/review/validation-matrix.review.md\`"
+    echo "- \`STANDARDS.md\` + applicable \`feedforward/rules/\`"
+    if [ -n "$task_file" ]; then
+      echo "- Task: \`$task_file\`"
+    fi
+    echo ""
+    echo "Fill the matrix in \`validation-matrix.review.md\` and set **Overall: PASS | FAIL**."
+    echo ""
+    if [ "$failed" -gt 0 ]; then
+      echo "## Overall: FAIL (computational sensors)"
+    elif [ "$review_pending" -gt 0 ]; then
+      echo "## Overall: PENDING REVIEW (computational OK — complete inferential review)"
+    else
+      echo "## Overall: PASS (computational only — confirm review)"
+    fi
+  } > "$report_file"
+
   echo ""
+  echo -e "  ${BOLD}Report:${RESET} $report_file"
+  echo ""
+
   if [ "$failed" -eq 0 ]; then
-    echo -e "  ${GREEN}${BOLD}All sensors passed${RESET} ($passed/$((passed+failed)))"
+    if [ "$review_pending" -gt 0 ]; then
+      echo -e "  ${GREEN}${BOLD}Computational sensors passed${RESET} ($passed run, $review_pending need review)"
+    else
+      echo -e "  ${GREEN}${BOLD}All computational sensors passed${RESET} ($passed/$((passed+failed)))"
+    fi
+    echo ""
+    echo -e "  ${BOLD}Next:${RESET} Run review agent using files listed in the validation report."
 
     # Auto-update progress.md Last Session
     local session_summary="All sensors passed ($passed sensors)."
@@ -3407,17 +3747,26 @@ cmd_run() {
     [ ! -f "$spec_file" ] && spec_file=""
   fi
 
-  # Find skills listed in the task
+  # Resolve skills: registry auto-match + explicit task list
   local skills_content=""
-  if grep -q "feedforward/skills/" "$task_file" 2>/dev/null; then
-    while IFS= read -r skill_ref; do
-      local skill_path="$RIG_DIR/$skill_ref"
-      if [ -f "$skill_path" ] && [ "$skill_ref" != "feedforward/skills/_TEMPLATE.skill.md" ]; then
-        skills_content+=$(cat "$skill_path")
-        skills_content+=$'\n\n---\n\n'
-      fi
-    done < <(grep -o "feedforward/skills/[^ \`]*" "$task_file")
-  fi
+  local skill_ref skill_path
+  while IFS= read -r skill_ref; do
+    [ -z "$skill_ref" ] && continue
+    if [[ "$skill_ref" == feedforward/* ]]; then
+      skill_path="$RIG_DIR/$skill_ref"
+    elif [[ "$skill_ref" == "~/"* ]]; then
+      skill_path="${skill_ref/#\~/$HOME}"
+    elif [[ "$skill_ref" == /* ]]; then
+      skill_path="$skill_ref"
+    else
+      continue
+    fi
+    if [ -f "$skill_path" ] && [[ "$skill_ref" != *"_TEMPLATE.skill.md" ]]; then
+      skills_content+="# Skill: $skill_ref"$'\n\n'
+      skills_content+=$(cat "$skill_path")
+      skills_content+=$'\n\n---\n\n'
+    fi
+  done < <(resolve_skills_for_task "$task_file")
 
   # Assemble context
   local context_file="$RIG_DIR/context-${task_id}.md"
@@ -3428,6 +3777,15 @@ cmd_run() {
     echo ""
     echo "---"
     echo ""
+
+    if [ -f "$RIG_DIR/STANDARDS.md" ]; then
+      echo "## Standards Index (read first)"
+      echo ""
+      cat "$RIG_DIR/STANDARDS.md"
+      echo ""
+      echo "---"
+      echo ""
+    fi
 
     echo "## Project Overview"
     echo ""
@@ -3504,12 +3862,16 @@ cmd_run() {
     echo "You are the **implementer**. Read the task contract above and build exactly what it specifies."
     echo ""
     echo "Rules:"
+    echo "- Read STANDARDS.md and every applicable feedforward/rules/*.rules.md before coding"
+    echo "- Follow patterns in loaded Skills (auto-routed from skills.registry.md)"
     echo "- Build only what the contract specifies"
     echo "- Only modify files listed in File Ownership"
     echo "- Run sensors during implementation as a self-repair pre-check"
     echo "- Check each contract item when complete"
     echo "- The validator — not you — declares the task done"
     echo "- Record discoveries in memory/learnings.md before handoff"
+    echo ""
+    echo "After implementation, human runs: rig-spec validate $task_id"
     echo ""
     echo "If you cannot finish (context too full or task too large):"
     echo "1. Write [CHECKPOINT] to memory/progress.md with what's done and what remains"
@@ -4231,6 +4593,10 @@ cmd_plan() {
     echo ""
     echo "File naming: task-01-[name].task.md, task-02-[name].task.md, ..."
     echo ""
+    echo "Standards — mandatory:"
+    echo "- List applicable files under '## Standards to Follow' in each task (see STANDARDS.md)"
+    echo "- Prefer sensors: test, endpoint (if API), standards-compliance, spec-compliance"
+    echo ""
     echo "Sensor files — mandatory:"
     echo "For every contract item that says '← verified by: [sensor]', output the sensor file:"
     echo ""
@@ -4313,7 +4679,7 @@ cmd_help() {
   echo "  status               Show current project state (specs, tasks, sensors)"
   echo "  resume               Print full context for the next agent session"
   echo "  run <task-id>        Assemble task context for your AI agent"
-  echo "  validate             Run all configured sensors (uses last run task by default)"
+  echo "  validate [task-id]     Run sensors + write feedback/reports/validation-*.md"
   echo "  done <task-id>       Mark a task complete — updates progress.md and HARNESS.md"
   echo "  sensors              Check all sensor configurations are executable"
   echo "  audit                Run continuous drift sensors"

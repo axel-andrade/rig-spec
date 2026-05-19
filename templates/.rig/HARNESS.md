@@ -47,6 +47,12 @@ Full instructions: `memory/bootstrap.md`
 
 ---
 
+## Project Standards
+
+→ **`STANDARDS.md`** — index of all coding/architecture/UI rules (`feedforward/rules/`)
+
+→ **`feedforward/skills.registry.md`** — automatic skill routing on `rig-spec run`
+
 ## Available Skills
 
 - None configured yet → see `feedforward/skills/_TEMPLATE.skill.md`
@@ -90,9 +96,12 @@ git checkout main && git merge --no-ff feat/[feature-name]
 |---|---|
 | `feedforward/specs/` | Feature specifications |
 | `feedforward/tasks/` | Task breakdowns per spec |
+| `STANDARDS.md` | Index of patterns (architecture, naming, UI tokens) |
 | `feedforward/rules/` | Coding conventions and architecture rules |
+| `feedforward/skills.registry.md` | Auto skill routing by task keywords |
 | `feedforward/skills/` | Specialized local knowledge |
 | `feedback/sensors/` | Automated validation commands |
+| `feedback/reports/` | Validation reports from `rig-spec validate` |
 | `memory/progress.md` | Current state of all work |
 | `memory/decisions.md` | Architectural decisions |
 | `memory/learnings.md` | Implementation discoveries and gotchas |

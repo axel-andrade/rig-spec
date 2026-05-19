@@ -45,15 +45,18 @@ rig-spec init
 ```
 .rig/
 ├── HARNESS.md          ← vision, business rules, current focus — every agent reads this first
+├── STANDARDS.md        ← index: where architecture, naming, UI tokens, API rules live
 ├── feedforward/        ← guides the agent before it acts
 │   ├── specs/          ← what to build
 │   ├── tasks/          ← how to divide the work
 │   ├── rules/          ← coding and architecture conventions
+│   ├── skills.registry.md ← auto skill routing by task keywords
 │   ├── skills/         ← specialized context (NestJS, PostgreSQL, etc.)
 │   └── mcp.config.md   ← MCP server declarations
 ├── feedback/           ← corrects the agent after it acts
-│   ├── sensors/        ← linters, tests, type checkers, arch analysis
-│   ├── review/         ← AI review agent instructions
+│   ├── sensors/        ← linters, tests, endpoints, compliance checks
+│   ├── reports/        ← validation artifacts (rig-spec validate)
+│   ├── review/         ← AI review agent instructions (always on validate)
 │   └── audit/          ← continuous drift detection
 ├── memory/             ← persists state between sessions
 │   ├── progress.md     ← what's done, what's next
@@ -413,46 +416,65 @@ Then fill in `.rig/HARNESS.md` and start with your first spec.
 
 ## Project Standards System
 
-One of the most powerful features of `rig-spec` is how it captures and enforces your project's own patterns — architecture, naming, component structure, API conventions — and uses them as both context for agents and as automated compliance checks.
+Your project's patterns — architecture, naming, API shape, UI tokens, components — live in **fixed locations**. Agents read them before every task; sensors and review verify them after.
 
 **The core insight:** standards are feedforward. Compliance is feedback.
 
 ```
-rules/ (feedforward)     →    sensors/ (feedback)
-"here's how we do it"   →    "did you follow it?"
+STANDARDS.md (index)  →  rules/ (what to follow)  →  sensors/ + review (did you follow it?)
 ```
 
-### Where Standards Live
+### Canonical locations
 
-```
-.rig/feedforward/rules/
-├── architecture.rules.md    ← layering rules, module boundaries
-├── naming.rules.md          ← naming conventions for files, classes, functions
-├── structure.rules.md       ← folder organization patterns
-├── component.rules.md       ← frontend component patterns (when applicable)
-├── api.rules.md             ← endpoint design, response format, error handling
-└── testing.rules.md         ← what to test, how to structure tests
-```
+| What | Where |
+|---|---|
+| **Index (start here)** | `.rig/STANDARDS.md` |
+| Architecture & layering | `.rig/feedforward/rules/architecture.rules.md` |
+| Naming | `.rig/feedforward/rules/naming.rules.md` |
+| Folder layout | `.rig/feedforward/rules/structure.rules.md` |
+| API conventions | `.rig/feedforward/rules/api.rules.md` |
+| Tests | `.rig/feedforward/rules/testing.rules.md` |
+| React/UI components | `.rig/feedforward/rules/component.rules.md` (frontend) |
+| Colors, spacing, typography | `.rig/feedforward/rules/design-tokens.rules.md` (frontend) |
 
-These files are injected into the agent's context before every task. The agent knows your patterns before writing a single line.
+On `rig-spec run`, all existing `*.rules.md` files are injected into the agent context. On retrofit, `structure.rules.md` is generated from your real `src/` tree; other files start as `[DRAFT]` for you to complete.
 
-### Sensors That Enforce Standards
+### Automatic skill routing
 
-**Computational sensors (fast, deterministic):**
-```
-.rig/feedback/sensors/
-├── arch.sensor.md        ← checks module boundaries (dependency-cruiser)
-├── naming.sensor.md      ← checks naming conventions (ESLint custom rules)
-└── structure.sensor.md   ← checks folder/file organization
-```
+`.rig/feedforward/skills.registry.md` maps **keywords in the task** → **skills** (local `.rig` files or external paths like `~/.claude/skills/...`).
 
-**Inferential sensor (AI, semantic):**
-```
-.rig/feedback/sensors/
-└── standards-compliance.sensor.md  ← AI reviewer reads rules/ and checks implementation
+Example: a task mentioning `endpoint` and `service` auto-loads `nodejs.skill.md`; a task mentioning `component` and `page` loads `react.skill.md`.
+
+```bash
+rig-spec run task-03   # assembles rules + auto-matched skills + task contract
 ```
 
-The inferential sensor catches what linters cannot: wrong layer for business logic, component in the wrong folder, API response that doesn't follow the project envelope.
+Disable auto-routing for one task by adding `skills: manual` in the task file.
+
+### Best sensors per task type
+
+| Task type | Recommended sensors |
+|---|---|
+| Any code | `lint`, `typecheck`, `test` |
+| API / routes | + `endpoint` (integration or curl smoke) |
+| Every task | + `spec-compliance`, `standards-compliance` (review agent) |
+| Module boundaries | + `arch` (dependency-cruiser, etc.) |
+
+Templates ship on `init`. Configure `endpoint.sensor.md` with your real test command.
+
+### Validation report (visual artifact)
+
+```bash
+rig-spec validate task-01
+```
+
+Produces `.rig/feedback/reports/validation-task-01-YYYY-MM-DD.md` with:
+
+- **Sensor matrix** — pass / fail / review per sensor
+- **Contract checklist** — copied from the task
+- **Review instructions** — always points to `code-review.review.md` + `validation-matrix.review.md` + `STANDARDS.md`
+
+Computational sensors run in the CLI. Inferential sensors are marked `REVIEW` — run your review agent against the report and rules until **Overall: PASS**.
 
 ---
 
