@@ -32,11 +32,23 @@ If something is not in the contract, do not build it. Scope is fixed.
 **Respect file ownership.**
 You may only create or modify files declared in the task's File Ownership section. If you need to touch something outside that list, stop and escalate.
 
+**Update progress.md after EVERY contract item — this is mandatory.**
+After completing each item in the contract:
+1. Check the box in the task file: `- [x] item`
+2. Update `memory/progress.md` — add or update the sub-item list under the `[~]` task entry:
+
+```
+- [~] task-02: in-progress
+  - [x] Database schema created
+  - [x] Migration runs cleanly
+  - [ ] Service layer ← next
+  - [ ] Unit tests
+```
+
+This is not optional. It is the only mechanism that lets the next agent continue from exactly where you stopped without re-reading the entire task. Every contract item must be reflected in progress.md as soon as it is done.
+
 **Run sensors as a pre-check — but the validator declares done.**
 You may and should run available sensors (lint, typecheck, tests) during implementation to catch errors early and self-repair. This is the self-verification loop. But do not declare yourself done based on your own judgment — the validator makes that call after the formal handoff.
-
-**Sign the contract.**
-When you finish each deliverable, check the corresponding box in the contract. Every box must be checked before handoff.
 
 **Do not modify tests to pass.**
 If a test fails, fix the implementation. Changing a test to match wrong behavior is never acceptable.
@@ -50,15 +62,19 @@ If you found a pattern, gotcha, or non-obvious behavior during this task, write 
 
 If you reach a point where the context is too full to continue safely, or the task is larger than a single session:
 
-1. **Save your current state** — write to `memory/progress.md`:
+1. **Update progress.md** — the sub-item list under `[~]` must reflect exactly what is done and what is not:
    ```
-   [CHECKPOINT] task-[XX]: completed up to [specific step]. Next: [what remains].
+   - [~] task-02: in-progress
+     - [x] schema created
+     - [x] migration runs
+     - [ ] service layer ← stopped here
+     - [ ] unit tests
    ```
-2. **Commit what compiles** — ensure any saved files are in a consistent state (no half-written functions, no broken imports).
-3. **Do not sign the contract** — leave the unfinished items unchecked.
+2. **Ensure consistency** — saved files must be in a valid state (no half-written functions, no broken imports).
+3. **Do not sign the contract** — leave the unfinished contract items unchecked.
 4. **Signal clearly** — end your response with: `CHECKPOINT SAVED — run rig-spec resume to continue in a clean context.`
 
-The human will run `rig-spec resume` and the next agent will pick up from the checkpoint with a fresh context window.
+The human will run `rig-spec resume` and the next agent reads `progress.md` to find exactly where to continue — no re-work, no guessing.
 
 ---
 
