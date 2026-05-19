@@ -18,6 +18,12 @@ _None yet._
 
 ---
 
+## Pending Handoff
+
+_When an agent hands off mid-task, a `[CHECKPOINT]` block appears under the active feature (see `memory/session-handoff.md`). The next session reads it via `rig-spec resume`._
+
+---
+
 ## Last Session
 
 **Date:** —

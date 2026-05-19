@@ -301,15 +301,42 @@ O agente lê tudo, implementa o que está no contrato e assina cada item.
 
 > Os arquivos `context-*.md` são temporários e já estão no `.rig/.gitignore` — não vão parar no seu repositório.
 
-**E se o agente não conseguir terminar em uma sessão?**
+**E se o chat ficar longo ou o agente começar a alucinar?**
 
-Tasks longas podem exceder a janela de contexto. Quando isso acontece, o agente deve seguir o **Continuation Protocol**:
+Todo contexto montado por `rig-spec run` (e `handoff`) inclui regras de **continuidade de sessão**. O agente deve salvar estado em disco — não confiar na memória do chat.
 
-1. Escreve um `[CHECKPOINT]` em `memory/progress.md` com o que foi feito e o que falta
-2. Deixa os itens de contrato incompletos desmarcados
-3. Sinaliza: `CHECKPOINT SAVED — run rig-spec resume to continue`
+**Sinais para encerrar esta conversa e abrir outra:**
 
-Você roda `rig-spec resume` — o próximo agente começa com contexto limpo e lê o checkpoint para saber exatamente onde continuar.
+- Respostas vagas, repetidas ou contraditórias
+- Você não confia no que já foi implementado neste thread
+- Um pedaço lógico terminou (um item do contrato, um arquivo) e ainda falta o resto da task
+
+**Fluxo recomendado:**
+
+```bash
+# 1. Na conversa ATUAL — pede ao agente só salvar estado (não codar mais)
+rig-spec handoff
+cat .rig/context-handoff-<task>.md   # cole no chat
+
+# 2. Confirme [CHECKPOINT] em .rig/memory/progress.md
+
+# 3. FECHE este chat. Abra um NOVO agente:
+rig-spec resume                        # cole o output no chat novo
+```
+
+O agente da sessão antiga termina com a linha exata:
+
+`HANDOFF SAVED — close this chat and run: rig-spec resume`
+
+**Ver estado da sessão:**
+
+```bash
+rig-spec session
+```
+
+Mostra task atual, se há CHECKPOINT pendente e quando fazer handoff.
+
+Guia completo: `.rig/memory/session-handoff.md`
 
 ---
 
@@ -360,17 +387,17 @@ A sugestão aparece formatada com o nome da feature e o id da task. O commit é 
 
 ---
 
-### 8. Retomar uma sessão
+### 8. Retomar uma sessão (chat novo)
 
-Abriu o computador no dia seguinte e não lembra onde parou?
+Use **sempre um chat novo** após handoff ou no dia seguinte — não continue no thread antigo.
 
 ```bash
 rig-spec resume
 ```
 
-Imprime o contexto completo: projeto, o que foi feito, o que está pendente, descobertas de implementação (`learnings.md`) e a spec ativa. Cole no agente e continue de onde parou — sem gastar tokens reconstruindo contexto.
+Imprime: regras de handoff, CHECKPOINT em destaque (se existir), HARNESS, `progress.md`, `learnings.md`, spec ativa e a task do último `rig-spec run`.
 
-Se a sessão anterior terminou com um `[CHECKPOINT]` em `progress.md`, o agente lê e sabe exatamente onde continuar dentro da task interrompida.
+Se havia `[CHECKPOINT]` em `progress.md`, o próximo agente começa pelo campo **Next action** — sem refazer o que está em **Do not redo**.
 
 ---
 

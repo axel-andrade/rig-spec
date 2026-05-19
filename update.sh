@@ -148,6 +148,7 @@ create_if_absent() {
 }
 
 create_if_absent "memory/learnings.md"
+create_if_absent "memory/session-handoff.md"
 
 # ─────────────────────────────────────────────
 # 3. Patch HARNESS.md — non-destructive

@@ -173,6 +173,39 @@ find_task_file_or_fail() {
   return 0
 }
 
+# Injected at the top of every rig-spec context file for chat-based agents
+session_continuity_block() {
+  cat << 'SESSION_EOF'
+## Session continuity (mandatory — read first)
+
+Chat sessions have a **limited context window**. Hallucination usually means the window is full or polluted — not that the model "forgot".
+
+**Persist state on disk before improvising:**
+- After each contract sub-item done → update `memory/progress.md` (`[~]` task + checked sub-items) and the task file.
+- Gotchas / patterns → append `memory/learnings.md`.
+
+**Start a NEW chat (hand off) when ANY is true:**
+- You are unsure what was already implemented in this conversation
+- The user says the chat is long, slow, repetitive, or drifting
+- You finished one logical chunk (one contract item, one file, one endpoint) and more work remains
+- You would need to re-read many files to continue safely
+
+**Handoff (end this chat → fresh agent):**
+1. Follow `.rig/memory/session-handoff.md` and write a `[CHECKPOINT]` in `memory/progress.md`
+2. Last line of your message must be exactly: `HANDOFF SAVED — close this chat and run: rig-spec resume`
+3. Human opens a **new** chat and pastes only `rig-spec resume` output — not this entire context again
+
+Human can trigger early: `rig-spec handoff` (assembles a save-state prompt).
+
+**Forbidden:** continuing a large task in a degraded chat without saving progress.
+SESSION_EOF
+}
+
+progress_has_checkpoint() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ -f "$progress" ] && grep -q '\[CHECKPOINT\]' "$progress" 2>/dev/null
+}
+
 shape_slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-'
 }
@@ -571,8 +604,9 @@ write_progress_md() {
   cat > "$RIG_DIR/memory/progress.md" << 'EOF'
 # Progress
 
-> Updated after every validated task.
+> Updated after EVERY contract item — not only after validate/done.
 > This file is the source of truth for project state.
+> An agent reading this file knows exactly where to resume.
 
 ---
 
@@ -588,6 +622,12 @@ _None yet._
 
 ---
 
+## Pending Handoff
+
+_When an agent hands off mid-task, a `[CHECKPOINT]` block appears under the active feature (see `memory/session-handoff.md`). The next session reads it via `rig-spec resume`._
+
+---
+
 ## Last Session
 
 **Date:** —
@@ -596,6 +636,78 @@ _None yet._
 **Blockers:** None.
 EOF
   print_ok "memory/progress.md created"
+}
+
+write_session_handoff_md() {
+  cat > "$RIG_DIR/memory/session-handoff.md" << 'EOF'
+# Session Handoff — Save Progress & Start a New Agent
+
+> Use when a chat session is getting long or the agent starts guessing.
+> Goal: **zero lost work** — the next agent reads files, not chat history.
+
+---
+
+## When to hand off
+
+Hand off (do not keep coding in the same chat) if:
+
+- Context feels full, answers get vague, or the agent repeats mistakes
+- One contract sub-item or file is done and more work remains on the same task
+- The human runs `rig-spec handoff` or asks to "save progress and new session"
+
+---
+
+## What the agent must write before ending
+
+### 1. `[CHECKPOINT]` inside `memory/progress.md`
+
+Under the active feature section, add or replace:
+
+```markdown
+[CHECKPOINT] YYYY-MM-DD — task-id-or-name
+
+**Stopped after:** [what was completed — files, contract items]
+**Next action:** [single concrete next step — file + change]
+**Do not redo:** [what is already done and must not be rebuilt]
+**Open questions:** [decisions needed from human, or none]
+**Files touched:** [paths]
+```
+
+Also update `[~]` task line with checked sub-items for everything finished.
+
+### 2. `memory/learnings.md` (if anything non-obvious was discovered)
+
+Short bullets only — patterns, gotchas, API quirks.
+
+### 3. Task file checkboxes
+
+Check every contract item that is truly done in the `.task.md` file.
+
+### 4. Final chat line (exact)
+
+```
+HANDOFF SAVED — close this chat and run: rig-spec resume
+```
+
+---
+
+## What the human does
+
+1. Verify `memory/progress.md` has the `[CHECKPOINT]` block
+2. **Close** the current chat (do not continue implementing there)
+3. Open a **new** chat / new agent
+4. Run `rig-spec resume` and paste the output — or in Cursor/Claude Code: `read .rig/memory/bootstrap.md` then progress + current task
+
+---
+
+## Resume checklist (new session)
+
+1. `.rig/memory/bootstrap.md` reading order
+2. `.rig/memory/progress.md` — find `[CHECKPOINT]`
+3. Active task file — contract items still `[ ]`
+4. Implement **only** "Next action" from the checkpoint first
+EOF
+  print_ok "memory/session-handoff.md created"
 }
 
 write_bootstrap_md() {
@@ -619,7 +731,11 @@ What it answers: Architecture, naming, API, UI tokens — patterns you must foll
 
 ### 3. Current State
 → Read `.rig/memory/progress.md`
-What it answers: What's done? What's next? Any blockers?
+What it answers: What's done? What's next? Any blockers? **Search for `[CHECKPOINT]`** if the previous session handed off.
+
+### 3b. Session handoff rules (when chat was long)
+→ Read `.rig/memory/session-handoff.md`
+What it answers: How checkpoints work and what not to redo.
 
 ### 4. Architectural Decisions (when exists)
 → Read `.rig/memory/decisions.md`
@@ -3362,6 +3478,7 @@ cmd_init() {
   write_harness_md
   write_progress_md
   write_bootstrap_md
+  write_session_handoff_md
   write_decisions_md
   write_spec_template
   write_task_template
@@ -3387,6 +3504,7 @@ cmd_init() {
 context-*.md
 # Current task tracker — local session state
 .current-task
+.handoff-pending
 EOF
 
   print_step "Creating agent entry points..."
@@ -3509,14 +3627,36 @@ cmd_status() {
 
 cmd_resume() {
   require_rig
+  rm -f "$RIG_DIR/.handoff-pending"
+
   echo ""
   echo -e "${BOLD}${CYAN}rig-spec resume${RESET}"
   echo -e "${CYAN}──────────────────────────────────────${RESET}"
   echo ""
-  echo -e "${DIM}Copy the context below and paste into your AI agent.${RESET}"
+  echo -e "${DIM}NEW chat session — paste the block below into a fresh agent (not the old thread).${RESET}"
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
+  echo "> **New session.** The agent has no memory of prior chats. State lives only in `.rig/` files."
+  echo ""
+
+  if progress_has_checkpoint; then
+    echo -e "${BOLD}${YELLOW}⚠ Pending CHECKPOINT in progress.md — continue from here:${RESET}"
+    echo ""
+    awk '/\[CHECKPOINT\]/{p=1} p{print} p && /^## [^#]/ && !/\[CHECKPOINT\]/{exit}' "$RIG_DIR/memory/progress.md" 2>/dev/null || true
+    echo ""
+    echo "---"
+    echo ""
+  fi
+
+  if [ -f "$RIG_DIR/memory/session-handoff.md" ]; then
+    echo "## Session handoff rules"
+    echo ""
+    cat "$RIG_DIR/memory/session-handoff.md"
+    echo ""
+    echo "---"
+    echo ""
+  fi
 
   # Print HARNESS.md
   if [ -f "$RIG_DIR/HARNESS.md" ]; then
@@ -3560,10 +3700,164 @@ cmd_resume() {
     fi
   fi
 
+  # Current task file (from last rig-spec run)
+  if [ -f "$RIG_DIR/.current-task" ]; then
+    local cur_task cur_file
+    cur_task=$(cat "$RIG_DIR/.current-task")
+    cur_file=$(find_task_file "$cur_task" 2>/dev/null) || cur_file=""
+    if [ -n "$cur_file" ] && [ -f "$cur_file" ]; then
+      echo "## Current Task (from last run)"
+      echo ""
+      cat "$cur_file"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+  fi
+
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo -e "  ${DIM}Paste the block above into your AI agent.${RESET}"
-  echo -e "  ${DIM}It now has full context to continue working.${RESET}"
+  echo -e "  ${DIM}Paste the block above into a **new** AI chat.${RESET}"
+  if progress_has_checkpoint; then
+    echo -e "  ${DIM}Start with the CHECKPOINT \"Next action\" — do not redo completed work.${RESET}"
+  else
+    echo -e "  ${DIM}Continue from progress.md \"What's next\" or the current task contract.${RESET}"
+  fi
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_session — quick session health / handoff hint
+# ─────────────────────────────────────────────
+
+cmd_session() {
+  require_rig
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec session${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if [ -f "$RIG_DIR/.current-task" ]; then
+    echo -e "  ${BOLD}Current task:${RESET} $(cat "$RIG_DIR/.current-task")"
+  else
+    echo -e "  ${BOLD}Current task:${RESET} ${DIM}(none — run rig-spec run <task-id>)${RESET}"
+  fi
+
+  local active
+  active=$(harness_active_feature)
+  [ -n "$active" ] && [ "$active" != "none" ] && \
+    echo -e "  ${BOLD}Active feature:${RESET} $active"
+
+  if progress_has_checkpoint; then
+    print_warn "Pending CHECKPOINT in memory/progress.md — use a new chat + rig-spec resume"
+  fi
+
+  if [ -f "$RIG_DIR/.handoff-pending" ]; then
+    print_warn "Handoff requested — agent should save CHECKPOINT, then: rig-spec resume in new chat"
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}Hand off to a new agent when:${RESET}"
+  echo "    • Chat is long or answers drift"
+  echo "    • Agent unsure what is already done"
+  echo "    • One chunk done, more work remains on same task"
+  echo ""
+  echo -e "  ${BOLD}Commands:${RESET}"
+  echo "    rig-spec handoff [task-id]   Save-state prompt for the current agent"
+  echo "    rig-spec resume              Context for a **new** chat session"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_handoff — assemble save-state context before new session
+# ─────────────────────────────────────────────
+
+cmd_handoff() {
+  require_rig
+  local task_id="$1"
+
+  if [ -z "$task_id" ] && [ -f "$RIG_DIR/.current-task" ]; then
+    task_id=$(cat "$RIG_DIR/.current-task")
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec handoff${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if [ -z "$task_id" ]; then
+    print_err "Usage: rig-spec handoff [task-id]"
+    echo ""
+    echo "  Run a task first: rig-spec run <task-id>"
+    echo "  Or pass the task id explicitly."
+    echo ""
+    exit 1
+  fi
+
+  local task_file
+  if ! task_file=$(find_task_file_or_fail "$task_id"); then
+    print_err "Task not found: $task_id"
+    exit 1
+  fi
+
+  local task_basename feature_dir
+  task_basename=$(basename "$task_file" .task.md)
+  feature_dir=$(basename "$(dirname "$task_file")")
+
+  date -Iseconds > "$RIG_DIR/.handoff-pending"
+
+  local context_file="$RIG_DIR/context-handoff-${task_basename}.md"
+  {
+    session_continuity_block
+    echo ""
+    echo "---"
+    echo ""
+    echo "# Handoff — save progress and end this session"
+    echo ""
+    echo "> **Do not implement new code.** Your only job is to persist state for the next agent."
+    echo ""
+    echo "**Task:** \`$task_basename\` (feature: \`$feature_dir\`)"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Task contract (verify checkboxes)"
+    echo ""
+    cat "$task_file"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Current progress.md"
+    echo ""
+    [ -f "$RIG_DIR/memory/progress.md" ] && cat "$RIG_DIR/memory/progress.md" || echo "_missing_"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Instructions"
+    echo ""
+    echo "1. Read \`.rig/memory/session-handoff.md\`"
+    echo "2. Update \`.rig/memory/progress.md\` with a \`[CHECKPOINT]\` block under the active feature"
+    echo "3. Check completed items in the task file above"
+    echo "4. Append discoveries to \`.rig/memory/learnings.md\` if any"
+    echo "5. End your message with exactly:"
+    echo ""
+    echo "   HANDOFF SAVED — close this chat and run: rig-spec resume"
+    echo ""
+    echo "**Forbidden:** starting new implementation in this chat after handoff."
+  } > "$context_file"
+
+  patch_progress_last_session \
+    "Handoff requested for $task_basename." \
+    "Agent saves CHECKPOINT → human runs rig-spec resume in a new chat"
+
+  print_ok "Handoff context: $context_file"
+  echo ""
+  echo "  1. Paste into the **current** chat (agent saves state):"
+  echo "     cat $context_file"
+  echo ""
+  echo "  2. Confirm progress.md has [CHECKPOINT]"
+  echo ""
+  echo "  3. Close this chat. Open a **new** agent and run:"
+  echo "     rig-spec resume"
   echo ""
 }
 
@@ -3938,9 +4232,14 @@ cmd_run() {
   # Assemble context (basename avoids collisions when task_id is a short fragment)
   local context_file="$RIG_DIR/context-${task_basename}.md"
   {
+    session_continuity_block
+    echo ""
+    echo "---"
+    echo ""
     echo "# Agent Context — $task_basename"
     echo ""
     echo "> Assembled by rig-spec run. Read everything below before writing any code."
+    echo "> If this chat gets long: \`rig-spec handoff\` → new chat → \`rig-spec resume\`."
     echo ""
     echo "---"
     echo ""
@@ -5166,7 +5465,9 @@ cmd_help() {
   echo -e "${BOLD}Workflow:${RESET}"
   echo "  overview             Show project vision, business rules, and current state"
   echo "  status               Show current project state (specs, tasks, sensors)"
-  echo "  resume               Print full context for the next agent session"
+  echo "  resume               Context for a NEW chat (after handoff or between tasks)"
+  echo "  handoff [task-id]    Prompt agent to save CHECKPOINT and end session"
+  echo "  session              Show current task + when to hand off"
   echo "  run <task-id>        Assemble task context for your AI agent"
   echo "  validate [task-id]     Run sensors + write feedback/reports/validation-*.md"
   echo "  done <task-id>       Mark a task complete — updates progress.md and HARNESS.md"
@@ -5201,6 +5502,8 @@ main() {
     overview)     cmd_overview ;;
     status)       cmd_status ;;
     resume)       cmd_resume ;;
+    handoff)      cmd_handoff "$@" ;;
+    session)      cmd_session ;;
     validate)     cmd_validate "$@" ;;
     done)         cmd_done "$@" ;;
     sensors)      cmd_sensors ;;
