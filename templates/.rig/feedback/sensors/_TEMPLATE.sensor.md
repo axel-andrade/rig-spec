@@ -1,7 +1,14 @@
+---
+command: [the exact command to run]
+type: computational
+timing: after-task
+---
+
 # Sensor: [Sensor Name]
 
-> Level 3 — Automated validation.
-> This sensor runs after implementation to verify correctness.
+> The `command:` key in the frontmatter above is what `rig-spec validate` executes.
+> Use frontmatter for the command — it is unambiguous and parser-safe.
+> Use the sections below for human/agent guidance only.
 
 ---
 
@@ -18,12 +25,6 @@
 - [ ] Continuous (scheduled — audit)
 
 ---
-
-## Command
-
-```bash
-[the exact command to run]
-```
 
 ## Pass Condition
 

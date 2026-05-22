@@ -63,6 +63,7 @@ They are consumed by agents during execution.**
 ```
 .rig/feedback/
 ├── sensors/              ← sensor definitions (what runs after each task)
+│   ├── sensors.config.yaml ← shorthand one-liner sensors (no .sensor.md needed)
 │   ├── lint.sensor.md
 │   ├── test.sensor.md
 │   ├── typecheck.sensor.md
@@ -433,7 +434,8 @@ Adapters are never required. They only enhance the experience when using a speci
 | Rules | Markdown | Coding conventions and architecture constraints |
 | Skills | Markdown | Specialized context and reusable patterns |
 | MCP config | Markdown | MCP server declarations and usage guidance |
-| Sensors | Markdown | Sensor definitions with commands |
+| Sensors | Markdown | Sensor definitions — `command:` key in YAML frontmatter at top of file |
+| Sensor config | YAML | Shorthand one-liner sensor commands (`sensors.config.yaml`) |
 | Progress | Markdown | Session state and task status |
 | Decisions | Markdown | ADR-style architectural decisions |
 | Bootstrap | Markdown | Ordered reading instructions |

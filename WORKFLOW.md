@@ -157,8 +157,10 @@ rig-spec shape "notification system" --complete
 
 **Output:**
 ```
-.rig/feedforward/specs/notification-system.spec.md
+.rig/feedforward/specs/20260522-143052-notification-system.spec.md
 ```
+
+> Spec files are automatically prefixed with `YYYYMMDD-HHMMSS-` so they sort chronologically and never collide. In Phase 2, the agent proposes the canonical slug — you accept or adjust it before the file is finalized.
 
 **Spec structure:**
 ```markdown
@@ -339,7 +341,17 @@ rig-spec validate task-01
 - `spec-compliance.sensor.md` — inferential: AI verifies impl matches spec
 - `standards-compliance.sensor.md` — inferential: AI verifies impl matches rules/
 
-To add a sensor manually: copy `_TEMPLATE.sensor.md`, fill in the `## Command` block, and `rig-spec validate` will pick it up automatically.
+To add a sensor: copy `_TEMPLATE.sensor.md`, fill in the `command:` key in the YAML frontmatter at the top of the file, and `rig-spec validate` picks it up automatically.
+
+**Shorthand sensors:** for simple one-liner commands, skip the `.sensor.md` file. Add entries to `.rig/feedback/sensors/sensors.config.yaml`:
+
+```yaml
+lint:      npm run lint
+typecheck: npx tsc --noEmit
+test:      npm test
+```
+
+If a `.sensor.md` with the same name exists, it takes priority over the config entry.
 
 #### Phase A — Computational Sensors (fast, deterministic)
 ```bash
@@ -421,6 +433,46 @@ rig-spec audit
 ```
 
 **Why this step exists:** This solves **Continuous Drift**. Individual tasks may pass all sensors, but gradual accumulation of small violations degrades the codebase over time. Audit runs on a schedule and catches what per-task sensors miss.
+
+---
+
+## Pivoting Mid-Feature — `replan`
+
+**Purpose:** Reassemble the planning context when direction has changed after some tasks are already done.
+
+**Command:**
+```bash
+rig-spec replan notification-system
+```
+
+**What happens:**
+1. Reads `memory/progress.md` and identifies completed tasks for this spec
+2. Assembles context that includes: completed tasks (for reference only), original spec, and a one-question prompt
+3. Agent asks ONE question about what changed before generating a revised plan
+4. Completed tasks are preserved — only pending tasks are replanned
+
+**When to use:**
+- New requirements arrived mid-feature
+- A technical constraint was discovered that changes the task order
+- The original task breakdown had wrong assumptions
+
+---
+
+## Archiving Completed Specs — `archive`
+
+**Purpose:** Keep `progress.md` lean by moving completed spec sections to long-term storage.
+
+**Command:**
+```bash
+rig-spec archive notification-system
+```
+
+**What happens:**
+1. Finds the `## Notification System` section in `progress.md`
+2. Writes the full section to `memory/archive/YYYY-MM-notification-system.md`
+3. Replaces the section in `progress.md` with a one-line reference: `→ archived in memory/archive/`
+
+**When to use:** `rig-spec status` suggests this automatically when 2 or more specs appear under `## Completed Features`.
 
 ---
 
@@ -536,10 +588,13 @@ Installs the `rig-spec` command to `~/.local/bin/`. No runtime required. Works o
 | `rig-spec audit` | Run continuous drift sensors, save report |
 | `rig-spec run <task-id>` | Assemble and print full task context for the agent |
 | `rig-spec research <topic>` | Create a research file in `memory/research/` |
-| `rig-spec shape <feature>` | Phase 1: CLI + agent clarifying questions |
-| `rig-spec shape <feature> --complete` | Phase 2: agent writes full spec |
+| `rig-spec shape <feature>` | Phase 1: CLI + agent clarifying questions; creates timestamped spec draft |
+| `rig-spec shape <feature> --complete` | Phase 2: agent proposes slug, writes full spec |
 | `rig-spec plan <spec-name>` | Phase 1: agent planning questions |
 | `rig-spec plan <spec-name> --complete` | Phase 2: create tasks + sensors |
+| `rig-spec plan <spec-name> --lite` | Skip Q&A — agent creates minimal task breakdown directly |
+| `rig-spec replan <spec-name>` | Pivot mid-feature — preserve completed tasks, replan the rest |
+| `rig-spec archive <spec-name>` | Move completed spec section from progress.md to memory/archive/ |
 | `rig-spec version` | Show installed version |
 
 > `run`, `research`, `shape`, and `plan` are **context assemblers** — they prepare and print the context so you can paste it into your AI agent of choice. No API calls are made.

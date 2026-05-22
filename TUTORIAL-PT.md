@@ -185,7 +185,7 @@ O comando faz **8 perguntas no terminal** (problema, usuários, objetivo, fora d
 
 **O que acontece na fase 1:**
 
-1. Rascunho da spec em `.rig/feedforward/specs/sistema-de-notificacoes.spec.md` (só com suas respostas do terminal)
+1. Rascunho da spec em `.rig/feedforward/specs/20260522-143052-sistema-de-notificacoes.spec.md` — o prefixo timestamp `YYYYMMDD-HHMMSS-` garante ordenação cronológica
 2. Contexto em `.rig/context-shape-sistema-de-notificacoes.md` — instrui o agente a **perguntar**, não a preencher tudo
 3. Template de Q&A em `.rig/memory/shape-qa/sistema-de-notificacoes.md`
 
@@ -206,7 +206,7 @@ rig-spec shape "sistema de notificações" --complete
 cat .rig/context-shape-sistema-de-notificacoes-complete.md
 ```
 
-Cole no agente. Agora ele gera a spec com User Stories, critérios de aceite, etc.
+Cole no agente. Agora ele gera a spec completa com User Stories, critérios de aceite, etc. Na fase 2, o agente também **propõe o slug canônico** para o nome do arquivo final — você aceita ou ajusta antes de salvar.
 
 Depois, preencha **Approved Fixtures** na spec (só você define entrada/saída esperada).
 
@@ -420,6 +420,39 @@ rig-spec audit
 ```
 
 Gera um relatório em `.rig/feedback/audit/report-YYYY-MM-DD.md` com: código morto, dependências desatualizadas, violações de arquitetura.
+
+---
+
+### 11. Replanejar no meio do caminho
+
+Se chegaram novos requisitos ou descobriram uma restrição técnica depois que algumas tasks já foram concluídas:
+
+```bash
+rig-spec replan sistema-de-notificacoes
+```
+
+O comando:
+1. Lê o `progress.md` e identifica as tasks já concluídas
+2. Monta contexto para o agente — incluindo as tasks concluídas como referência
+3. O agente faz **uma pergunta** sobre o que mudou antes de replanejar
+4. As tasks concluídas ficam preservadas — só as pendentes são replanejadas
+
+---
+
+### 12. Arquivar features concluídas
+
+Quando o `rig-spec status` mostrar 2 ou mais features em `## Completed Features`, o próprio comando vai sugerir o archive. Para manter o `progress.md` enxuto:
+
+```bash
+rig-spec archive sistema-de-notificacoes
+```
+
+O comando:
+1. Localiza a seção `## Sistema De Notificacoes` no `progress.md`
+2. Salva o conteúdo completo em `memory/archive/YYYY-MM-sistema-de-notificacoes.md`
+3. Substitui a seção por uma linha de referência: `→ archived in memory/archive/`
+
+O histórico completo fica preservado — só sai do arquivo ativo.
 
 ---
 
@@ -727,6 +760,21 @@ A maioria dos seus sensores será computacional. Sensores inferenciais são para
 
 ---
 
+### Atalho — sensors.config.yaml
+
+Para sensores simples de uma linha, você não precisa criar um arquivo `.sensor.md`. Adicione entradas em `.rig/feedback/sensors/sensors.config.yaml`:
+
+```yaml
+lint:      npm run lint
+test:      npm test
+typecheck: npx tsc --noEmit
+build:     npm run build
+```
+
+Se existir um `.sensor.md` com o mesmo nome, ele tem prioridade. Use `.sensor.md` quando precisar de instruções de `On Failure` ou configuração de timing específica.
+
+---
+
 ### Como criar um sensor novo
 
 **Passo 1 — Copie o template:**
@@ -738,15 +786,13 @@ cp .rig/feedback/sensors/_TEMPLATE.sensor.md .rig/feedback/sensors/coverage.sens
 **Passo 2 — Preencha os campos obrigatórios:**
 
 ```markdown
+---
+command: npm test -- --coverage --coverageThreshold='{"global":{"lines":80}}'
+type: computational
+timing: after-task
+---
+
 # Sensor: Cobertura de Testes
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-npm test -- --coverage --coverageThreshold='{"global":{"lines":80}}'
-```
 
 ## Pass condition
 Exit code 0. Cobertura de linhas ≥ 80% em todos os módulos.
@@ -947,8 +993,10 @@ Tudo bem. O Caminho 1 (agente único, você valida) funciona perfeitamente. Os p
 | `rig-spec init --retrofit` | Modo projeto existente — escaneia `src/`, gera structure.rules real, demais como [DRAFT] |
 | `rig-spec init --template <nome>` | Força template: `node-api`, `python-api`, `fullstack-nextjs`, `generic` |
 | `rig-spec overview` | Exibe visão do produto, regras de negócio e estado atual em tela limpa |
-| `rig-spec shape "feature"` | Faz 5 perguntas, cria spec, monta contexto para o agente completar |
-| `rig-spec plan <spec>` | Monta contexto para o agente criar as tasks |
+| `rig-spec shape "feature"` | Faz 5 perguntas, cria spec com timestamp, monta contexto para o agente completar |
+| `rig-spec plan <spec>` | Monta contexto para o agente criar as tasks (com fase de perguntas) |
+| `rig-spec plan <spec> --lite` | Cria tasks sem fase de perguntas (mais rápido para tasks simples) |
+| `rig-spec replan <spec>` | Replano de feature no meio do caminho, preservando tasks concluídas |
 | `rig-spec run <task-id>` | Monta contexto completo para o agente implementar |
 | `rig-spec validate` | Roda sensores + gera relatório em `feedback/reports/` |
 | `rig-spec validate <task-id>` | Sensores + contrato + relatório com matriz de validação |
@@ -956,5 +1004,6 @@ Tudo bem. O Caminho 1 (agente único, você valida) funciona perfeitamente. Os p
 | `rig-spec resume` | Imprime contexto completo para retomar sessão (inclui learnings e checkpoint) |
 | `rig-spec status` | Mostra progresso: feature ativa, tasks, última sessão |
 | `rig-spec research <tema>` | Cria arquivo de pesquisa em `memory/research/` |
+| `rig-spec archive <spec>` | Move seção concluída do progress.md para memory/archive/ |
 | `rig-spec audit` | Roda sensores de drift, salva relatório |
 | `rig-spec version` | Mostra versão instalada |

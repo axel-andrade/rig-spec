@@ -98,12 +98,15 @@ rig-spec init --retrofit               # existing project — scans src/ structu
 rig-spec init --template node-api      # force a specific template
 rig-spec overview                      # show vision, business rules, current state
 rig-spec research "topic"              # investigate before specifying
-rig-spec shape "feature name"          # ask 5 questions, pre-fill spec
-rig-spec plan feature-name             # break spec into tasks
+rig-spec shape "feature name"          # ask 5 questions, create timestamped spec
+rig-spec plan feature-name             # break spec into tasks (with Q&A)
+rig-spec plan feature-name --lite      # skip Q&A — quick minimal task breakdown
+rig-spec replan feature-name           # pivot mid-feature, preserve completed tasks
 rig-spec run task-01                   # assemble context for your AI agent
 rig-spec validate                      # run all sensors
 rig-spec validate task-01              # sensors + show task contract checklist
 rig-spec resume                        # pick up where you left off
+rig-spec archive feature-name          # archive completed spec from progress.md
 rig-spec audit                         # check for accumulated drift
 ```
 
@@ -140,11 +143,12 @@ Shows the generated `.rig/HARNESS.md` in a clean one-pager. Open the file and fi
 **Step 3 — Create your first spec**
 
 ```bash
-cp .rig/feedforward/specs/_TEMPLATE.spec.md \
-   .rig/feedforward/specs/my-first-feature.spec.md
+rig-spec shape "my first feature"
 ```
 
-Fill in: Problem, Goal, Out of Scope, User Stories, Acceptance Criteria, Approved Fixtures.
+Asks 5 questions, creates a timestamped draft spec (`YYYYMMDD-HHMMSS-slug.spec.md`), and assembles context for your agent to complete it with User Stories, Acceptance Criteria, and Approved Fixtures. Run `rig-spec shape "..." --complete` in Phase 2 to let the agent finalize the spec and choose the canonical slug.
+
+> **Note:** After `init`, open `.rig/HARNESS.md` and fill in the `## Vision` and `## Business Rules` sections — `init` warns you if they still contain placeholder text.
 
 **Step 4 — Create tasks**
 
@@ -373,7 +377,17 @@ cp -r rig-spec/templates/node-api/.rig your-project/
 | `spec-compliance.sensor.md` | AI verifies implementation matches spec acceptance criteria |
 | `standards-compliance.sensor.md` | AI verifies implementation matches `rules/` semantically |
 
-To add any sensor: copy `_TEMPLATE.sensor.md`, fill in `## Command`, and `rig-spec validate` picks it up automatically.
+To add a sensor: copy `_TEMPLATE.sensor.md`, fill in the `command:` key in the YAML frontmatter, and `rig-spec validate` picks it up automatically.
+
+**Shorthand sensors (`sensors.config.yaml`):** for simple one-liner commands, skip the `.sensor.md` file entirely. Add entries to `.rig/feedback/sensors/sensors.config.yaml`:
+
+```yaml
+lint:      npm run lint
+test:      npm test
+typecheck: npx tsc --noEmit
+```
+
+If a `.sensor.md` with the same name exists, it takes priority. Use `.sensor.md` when you need `On Failure` instructions or custom timing.
 
 ---
 

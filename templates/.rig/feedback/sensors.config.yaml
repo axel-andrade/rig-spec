@@ -1,0 +1,17 @@
+# sensors.config.yaml — shorthand sensor commands
+#
+# Add one-liner sensors here instead of creating a full .sensor.md file.
+# `rig-spec validate` runs every uncommented entry as a computational sensor.
+#
+# Rules:
+#   - One entry per line: name: command to run
+#   - Lines starting with # are comments (ignored)
+#   - If a .sensor.md with the same name exists in sensors/, it takes priority
+#   - Use .sensor.md when you need On Failure instructions or timing config
+#
+# Uncomment and adjust to match your project:
+#
+# lint:      npm run lint
+# test:      npm test
+# typecheck: npx tsc --noEmit
+# build:     npm run build

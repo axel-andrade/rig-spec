@@ -213,12 +213,61 @@ shape_slugify() {
 shape_qa_path() { echo "$RIG_DIR/memory/shape-qa/$(shape_slugify "$1").md"; }
 plan_qa_path()  { echo "$RIG_DIR/memory/plan-qa/$(shape_slugify "$1").md"; }
 
-# Extracts the bash command block from a sensor/audit markdown file.
-# Looks for ## Command followed by ```bash ... ```
+# Find a spec file by slug, handling optional timestamp prefix (YYYYMMDD-HHMMSS-slug).
+# Prints the path if found; returns 1 if not found.
+find_spec_file() {
+  local slug="$1"
+  local specs_dir="$RIG_DIR/feedforward/specs"
+
+  # Exact match first (legacy or no-timestamp)
+  if [ -f "$specs_dir/${slug}.spec.md" ]; then
+    echo "$specs_dir/${slug}.spec.md"
+    return 0
+  fi
+
+  # Glob: timestamp-prefixed files ending in -slug.spec.md
+  local match
+  match=$(find "$specs_dir" -name "*-${slug}.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | sort | tail -1)
+  if [ -n "$match" ]; then
+    echo "$match"
+    return 0
+  fi
+
+  # Broader partial match: any spec containing slug in name
+  match=$(find "$specs_dir" -name "*${slug}*.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | sort | tail -1)
+  if [ -n "$match" ]; then
+    echo "$match"
+    return 0
+  fi
+
+  return 1
+}
+
+# Extracts the command from a sensor/audit markdown file.
+# Priority 1: YAML frontmatter `command:` key (unambiguous, no parser fragility).
+# Priority 2: first ```bash block inside the ## Command section (legacy fallback).
 extract_command() {
   local file="$1"
+
+  # YAML frontmatter — check for `command:` between the opening and closing `---`
+  if head -1 "$file" | grep -q '^---$'; then
+    local fm_cmd
+    fm_cmd=$(awk '
+      NR==1 && /^---$/ { in_fm=1; next }
+      in_fm && /^---$/ { exit }
+      in_fm && /^command:/ { sub(/^command:[[:space:]]*/,""); print; exit }
+    ' "$file")
+    if [ -n "$fm_cmd" ]; then
+      echo "$fm_cmd"
+      return
+    fi
+  fi
+
+  # Fallback: first ```bash block scoped to the ## Command section
+  # (stops at the next heading so example blocks in other sections are ignored)
   awk '
     /^## Command/ { found=1; next }
+    found && /^##+/ { exit }
     found && /^```bash/ { in_block=1; next }
     in_block && /^```/ { exit }
     in_block { print }
@@ -2488,53 +2537,47 @@ write_sensor_templates() {
     case "$sensor" in
       eslint)
         cat > "$RIG_DIR/feedback/sensors/lint.sensor.md" << 'EOF'
+---
+command: npx eslint src/ --max-warnings 0
+type: computational
+timing: after-task
+---
+
 # Sensor: Lint (ESLint)
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-npx eslint src/ --max-warnings 0
-```
 
 ## Pass condition
 Exit code 0. Zero warnings, zero errors.
 
 ## On failure
-Fix all reported issues. Do not suppress rules.
+Fix all reported issues. Do not suppress rules with inline comments or config overrides.
 EOF
         ;;
       ruff)
         cat > "$RIG_DIR/feedback/sensors/lint.sensor.md" << 'EOF'
+---
+command: ruff check .
+type: computational
+timing: after-task
+---
+
 # Sensor: Lint (Ruff)
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-ruff check .
-```
 
 ## Pass condition
 Exit code 0. Zero violations.
 
 ## On failure
-Fix all reported issues. Do not add noqa suppressions without justification.
+Fix all reported issues. Do not add `noqa` suppressions without justification.
 EOF
         ;;
       typescript)
         cat > "$RIG_DIR/feedback/sensors/typecheck.sensor.md" << 'EOF'
+---
+command: npx tsc --noEmit
+type: computational
+timing: after-task
+---
+
 # Sensor: Type Check (TypeScript)
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-npx tsc --noEmit
-```
 
 ## Pass condition
 Exit code 0. Zero type errors.
@@ -2545,15 +2588,13 @@ EOF
         ;;
       mypy)
         cat > "$RIG_DIR/feedback/sensors/typecheck.sensor.md" << 'EOF'
+---
+command: mypy .
+type: computational
+timing: after-task
+---
+
 # Sensor: Type Check (mypy)
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-mypy .
-```
 
 ## Pass condition
 Exit code 0. Zero type errors.
@@ -2564,15 +2605,13 @@ EOF
         ;;
       npm-test)
         cat > "$RIG_DIR/feedback/sensors/test.sensor.md" << 'EOF'
+---
+command: npm test
+type: computational
+timing: after-task
+---
+
 # Sensor: Tests (npm test)
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-npm test
-```
 
 ## Pass condition
 Exit code 0. All tests pass.
@@ -2583,15 +2622,13 @@ EOF
         ;;
       pytest)
         cat > "$RIG_DIR/feedback/sensors/test.sensor.md" << 'EOF'
+---
+command: pytest
+type: computational
+timing: after-task
+---
+
 # Sensor: Tests (pytest)
-
-**Type:** Computational
-**Timing:** After every task
-
-## Command
-```bash
-pytest
-```
 
 ## Pass condition
 Exit code 0. All tests pass.
@@ -2608,23 +2645,85 @@ EOF
   fi
 }
 
+write_sensors_config() {
+  local config="$RIG_DIR/feedback/sensors.config.yaml"
+  [ -f "$config" ] && return  # never overwrite an existing config
+  cat > "$config" << 'EOF'
+# sensors.config.yaml — shorthand sensor commands
+#
+# Add one-liner sensors here instead of creating a full .sensor.md file.
+# `rig-spec validate` runs every uncommented entry as a computational sensor.
+#
+# Rules:
+#   - One entry per line: name: command to run
+#   - Lines starting with # are comments (ignored)
+#   - If a .sensor.md with the same name exists in sensors/, it takes priority
+#   - Use .sensor.md when you need On Failure instructions or timing config
+#
+# Uncomment and adjust to match your project:
+#
+# lint:      npm run lint
+# test:      npm test
+# typecheck: npx tsc --noEmit
+# build:     npm run build
+EOF
+}
+
 write_sensor_generic_template() {
   cat > "$RIG_DIR/feedback/sensors/_TEMPLATE.sensor.md" << 'EOF'
+---
+command: [the exact command to run]
+type: computational
+timing: after-task
+---
+
 # Sensor: [Name]
 
-**Type:** Computational | Inferential
-**Timing:** After every task | After integration | Continuous
+> The `command:` key in the frontmatter above is what `rig-spec validate` executes.
+> Use frontmatter for the command — it is unambiguous and parser-safe.
+> Use the sections below for human/agent guidance only.
 
-## Command
-```bash
-[command to run]
+---
+
+## Type
+
+- [ ] Computational (deterministic — linter, test runner, type checker)
+- [ ] Inferential (AI-based — semantic review, spec compliance)
+
+## Timing
+
+- [ ] After every task (fast)
+- [ ] After every task (slower — integration tests)
+- [ ] After integration (full review)
+- [ ] Continuous (scheduled — audit)
+
+---
+
+## Pass Condition
+
+Exit code: `0`
+[Any additional output conditions to check]
+
+## On Failure
+
+[What the agent should do when this sensor fails.]
+
+The agent receives the full output. It must:
+1. [Step 1 — e.g., fix the reported issues]
+2. [Step 2 — e.g., never suppress warnings with flags]
+3. [Step 3 — e.g., re-run the sensor after fixing]
+
+Do not mark the contract item as passed until this sensor exits 0.
+
+---
+
+## Error Format for Agent Correction
+
+[How the output is structured — so the agent knows how to parse failures.]
+
 ```
-
-## Pass condition
-Exit code 0. [Any additional conditions.]
-
-## On failure
-[What the agent must do when this sensor fails.]
+[example failure output format]
+```
 EOF
 }
 
@@ -3494,6 +3593,7 @@ cmd_init() {
   write_skills_registry
   write_compliance_sensor_templates
   write_audit_templates
+  write_sensors_config
   write_sensor_generic_template
   write_sensor_templates
   write_adapters
@@ -3550,6 +3650,31 @@ EOF
   echo "  Fill in vision and rules: rig-spec overview"
   echo "  Check status anytime:    rig-spec status"
   echo ""
+
+  # Placeholder check — show exactly which HARNESS.md sections still need content
+  local harness_check="$RIG_DIR/HARNESS.md"
+  local -a missing_sections=()
+
+  if grep -qF '[Add a one-paragraph description' "$harness_check" 2>/dev/null; then
+    missing_sections+=("Description (## Project)")
+  fi
+  if grep -qF '[Describe the product vision' "$harness_check" 2>/dev/null; then
+    missing_sections+=("Vision (## Vision)")
+  fi
+  if grep -qF '[Rule 1' "$harness_check" 2>/dev/null || grep -qF '[Rule 2' "$harness_check" 2>/dev/null; then
+    missing_sections+=("Business Rules (## Business Rules)")
+  fi
+
+  if [ ${#missing_sections[@]} -gt 0 ]; then
+    echo -e "  ${YELLOW}${BOLD}⚠  HARNESS.md needs your input — agents read this first:${RESET}"
+    echo ""
+    for s in "${missing_sections[@]}"; do
+      echo -e "  ${YELLOW}   · $s${RESET}"
+    done
+    echo ""
+    echo -e "  ${DIM}   Edit: $harness_check${RESET}"
+    echo ""
+  fi
 }
 
 # ─────────────────────────────────────────────
@@ -3619,6 +3744,23 @@ cmd_status() {
     print_dim "No sensors configured (Level 1 — manual validation)"
   fi
   echo ""
+
+  # Archive hint — suggest archiving when completed features accumulate
+  if [ -f "$progress" ]; then
+    local completed_sections
+    completed_sections=$(awk '
+      /^## Completed Features/ { in_completed=1; next }
+      /^## / { in_completed=0 }
+      in_completed && /^### / { count++ }
+      END { print count+0 }
+    ' "$progress" 2>/dev/null)
+
+    if [ "${completed_sections:-0}" -ge 2 ]; then
+      echo -e "  ${DIM}Tip: $completed_sections completed features in progress.md.${RESET}"
+      echo -e "  ${DIM}     rig-spec archive <spec-name>  — moves each to memory/archive/ to keep context lean.${RESET}"
+      echo ""
+    fi
+  fi
 }
 
 # ─────────────────────────────────────────────
@@ -3688,8 +3830,9 @@ cmd_resume() {
     local active
     active=$(grep "^\*\*Active Feature:\*\*" "$harness" | sed 's/\*\*Active Feature:\*\* //' | tr -d ' ')
     if [ -n "$active" ] && [ "$active" != "none" ]; then
-      local spec_file="$RIG_DIR/feedforward/specs/${active}.spec.md"
-      if [ -f "$spec_file" ]; then
+      local spec_file
+      spec_file=$(find_spec_file "$active" 2>/dev/null) || spec_file=""
+      if [ -n "$spec_file" ] && [ -f "$spec_file" ]; then
         echo "## Active Spec"
         echo ""
         cat "$spec_file"
@@ -3910,12 +4053,17 @@ cmd_validate() {
   local sensors_dir="$RIG_DIR/feedback/sensors"
   local sensor_files
   sensor_files=$(find "$sensors_dir" -name "*.sensor.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
+  local config_file="$RIG_DIR/feedback/sensors.config.yaml"
 
-  if [ -z "$sensor_files" ]; then
+  if [ -z "$sensor_files" ] && [ ! -f "$config_file" ]; then
     print_warn "No sensors configured."
     echo ""
-    echo "  Add sensor files to .rig/feedback/sensors/ to enable automated validation."
-    echo "  See: .rig/feedback/sensors/_TEMPLATE.sensor.md"
+    echo "  Option A — add one-liner commands to .rig/feedback/sensors.config.yaml:"
+    echo "    lint: npm run lint"
+    echo "    test: npm test"
+    echo ""
+    echo "  Option B — create a full sensor file:"
+    echo "    .rig/feedback/sensors/<name>.sensor.md (see _TEMPLATE.sensor.md)"
     echo ""
     return 0
   fi
@@ -3927,7 +4075,44 @@ cmd_validate() {
   local errors=()
   local -a report_rows=()
 
+  # --- sensors.config.yaml: shorthand one-liner sensors ---
+  if [ -f "$config_file" ]; then
+    while IFS= read -r line; do
+      line="${line%%#*}"   # strip inline comments
+      line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [ -z "$line" ] && continue
+
+      local cfg_name cfg_cmd
+      cfg_name="${line%%:*}"
+      cfg_cmd="${line#*: }"
+      cfg_name="$(echo "$cfg_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      cfg_cmd="$(echo "$cfg_cmd" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [ -z "$cfg_name" ] || [ -z "$cfg_cmd" ] && continue
+
+      # .sensor.md with same name takes priority — skip the config entry
+      [ -f "$sensors_dir/${cfg_name}.sensor.md" ] && continue
+
+      echo -ne "  Running ${BOLD}${cfg_name}${RESET}... "
+      if eval "$cfg_cmd" > /tmp/rig-sensor-output 2>&1; then
+        echo -e "${GREEN}PASS${RESET}"
+        report_rows+=("| ${cfg_name} | PASS | config |")
+        ((passed++)) || true
+      else
+        echo -e "${RED}FAIL${RESET}"
+        report_rows+=("| ${cfg_name} | FAIL | config |")
+        ((failed++)) || true
+        errors+=("$cfg_name")
+        echo ""
+        echo -e "  ${DIM}Output:${RESET}"
+        head -20 /tmp/rig-sensor-output | while IFS= read -r l; do echo "    $l"; done
+        echo ""
+      fi
+    done < "$config_file"
+  fi
+
+  # --- .sensor.md files ---
   while IFS= read -r sensor_file; do
+    [ -z "$sensor_file" ] && continue
     local sensor_name
     sensor_name=$(basename "$sensor_file" .sensor.md)
     local cmd
@@ -4198,6 +4383,34 @@ cmd_run() {
   fi
   print_ok "Task found: $task_file"
   echo -e "  ${DIM}Qualified id: ${feature_dir}/${task_short_id}${RESET}"
+
+  # Dependency check — warn if any declared dependency is not done in progress.md
+  local progress_file="$RIG_DIR/memory/progress.md"
+  if [ -f "$progress_file" ]; then
+    local dep_warnings=()
+    while IFS= read -r dep_line; do
+      dep_line="$(echo "$dep_line" | sed 's/^[[:space:]]*-[[:space:]]*//')"
+      [ -z "$dep_line" ] && continue
+      # Extract a task id fragment from the dependency line (first word-like slug after "Task" or at start)
+      local dep_slug
+      dep_slug=$(echo "$dep_line" | grep -oE '[0-9]{8}-[0-9]{6}-[0-9]+-[a-z0-9-]+|[0-9]+-[a-z0-9-]+' | head -1)
+      [ -z "$dep_slug" ] && continue
+      # Consider done if progress.md has [x] on a line containing the slug
+      if ! grep -qE "^\- \[x\].*${dep_slug}" "$progress_file" 2>/dev/null; then
+        dep_warnings+=("$dep_slug")
+      fi
+    done < <(awk '/^## Dependencies/{p=1;next} p && /^## /{exit} p && /^-/{print}' "$task_file" 2>/dev/null)
+
+    if [ ${#dep_warnings[@]} -gt 0 ]; then
+      echo ""
+      echo -e "  ${YELLOW}⚠  Dependency warning:${RESET}"
+      for w in "${dep_warnings[@]}"; do
+        echo -e "  ${YELLOW}   Not done in progress.md: $w${RESET}"
+      done
+      echo -e "  ${DIM}   Run dependant tasks first, or override if this is intentional.${RESET}"
+      echo ""
+    fi
+  fi
 
   # Find spec reference
   local spec_ref
@@ -4690,14 +4903,28 @@ cmd_shape() {
 
   local slug
   slug=$(shape_slugify "$feature")
-  local spec_file="$RIG_DIR/feedforward/specs/${slug}.spec.md"
   local qa_file
   qa_file=$(shape_qa_path "$feature")
 
+  # Phase 2: resolve spec file from Q&A stored path, then fall back to find_spec_file
   if [ "$phase" = "complete" ]; then
+    local spec_file=""
+    if [ -f "$qa_file" ]; then
+      local stored_path
+      stored_path=$(grep '^<!-- spec-file:' "$qa_file" 2>/dev/null | sed 's/<!-- spec-file: //;s/ -->//' | tr -d ' ')
+      [ -n "$stored_path" ] && [ -f "$RIG_DIR/$stored_path" ] && spec_file="$RIG_DIR/$stored_path"
+    fi
+    if [ -z "$spec_file" ]; then
+      spec_file=$(find_spec_file "$slug") || spec_file="$RIG_DIR/feedforward/specs/${slug}.spec.md"
+    fi
     cmd_shape_complete "$feature" "$slug" "$spec_file" "$qa_file" "$from_file"
     return
   fi
+
+  # Phase 1: generate timestamped spec file
+  local spec_ts
+  spec_ts=$(task_ts_prefix)
+  local spec_file="$RIG_DIR/feedforward/specs/${spec_ts}-${slug}.spec.md"
 
   echo ""
   echo -e "${BOLD}${CYAN}rig-spec shape — $feature${RESET} ${DIM}(phase 1: discover)${RESET}"
@@ -4839,6 +5066,7 @@ EOF
   # Q&A file template (human + agent fill before --complete)
   if [ ! -f "$qa_file" ]; then
     cat > "$qa_file" << EOF
+<!-- spec-file: feedforward/specs/${spec_ts}-${slug}.spec.md -->
 # Shape Q&A: $feature
 
 > Phase 1: paste the agent's clarifying questions below, then your answers.
@@ -5047,29 +5275,55 @@ cmd_shape_complete() {
     echo "**Approved Fixtures** — leave placeholder: \`[Human must fill this]\` — do NOT invent outputs"
     echo "**Out of Scope** — only what Q&A/human confirmed; flag extras as open questions"
     echo ""
+    # Extract timestamp from draft spec filename (YYYYMMDD-HHMMSS-slug.spec.md)
+    local spec_ts=""
+    local spec_basename
+    spec_basename=$(basename "$spec_file" .spec.md)
+    if [[ "$spec_basename" =~ ^([0-9]{8}-[0-9]{6})- ]]; then
+      spec_ts="${BASH_REMATCH[1]}"
+    fi
+
+    local specs_dir="$RIG_DIR/feedforward/specs"
+    local naming_instruction=""
+    if [ -n "$spec_ts" ]; then
+      naming_instruction="${spec_ts}-your-canonical-slug"
+    else
+      naming_instruction="your-canonical-slug"
+    fi
+
     echo "**Output format — required:**"
     echo ""
-    echo "  ## File: $spec_file"
+    echo "Step 1 — choose a canonical kebab-case slug for this spec (e.g. 'user-auth', 'payment-flow')."
+    echo "The slug must be short, lowercase, and describe the feature precisely."
+    echo ""
+    echo "Step 2 — output the full spec using this exact format:"
+    echo ""
+    echo "  ## File: $specs_dir/${naming_instruction}.spec.md"
     echo "  \`\`\`markdown"
     echo "  [full spec content]"
     echo "  \`\`\`"
     echo ""
-    echo "Preserve section headers from the template. After the block, list any remaining open questions."
+    if [ -n "$spec_ts" ]; then
+      echo "Keep the timestamp prefix ${spec_ts} in the filename — only replace 'your-canonical-slug'."
+      echo "If the draft name '${spec_basename}' is already canonical, keep it."
+    fi
+    echo ""
+    echo "Preserve all section headers. After the block, list any remaining open questions."
 
   } > "$context_file"
 
-  patch_harness_focus "$slug" "none — run rig-spec plan $slug after fixtures"
+  patch_harness_focus "$slug" "none — run rig-spec plan after spec is finalized"
   patch_progress_last_session \
     "Shape phase 2 context for '$feature'." \
-    "Paste context → save spec → fill Approved Fixtures → rig-spec plan $slug"
+    "Paste context → agent names + writes spec → fill Approved Fixtures → rig-spec plan <spec-slug>"
 
   print_ok "Context assembled: $context_file"
   echo ""
   echo "  Paste into your AI agent:"
   echo "    cat $context_file"
   echo ""
-  echo "  Then save output to: $spec_file"
-  echo "  Next: rig-spec plan $slug"
+  echo "  The agent will name and write the final spec to: $specs_dir/"
+  echo "  Next: rig-spec plan <slug-chosen-by-agent>"
   echo ""
 }
 
@@ -5151,16 +5405,18 @@ cmd_plan() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --complete) phase="complete"; shift ;;
+      --lite)     phase="lite";     shift ;;
       *)          spec_name="$1"; shift ;;
     esac
   done
 
   if [ -z "$spec_name" ]; then
     echo ""
-    print_err "Usage: rig-spec plan <spec-name> [--complete]"
+    print_err "Usage: rig-spec plan <spec-name> [--complete|--lite]"
     echo ""
     echo "  Phase 1 (default): agent asks planning questions before creating tasks"
     echo "  Phase 2: rig-spec plan <spec-name> --complete  (after saving Q&A)"
+    echo "  Lite:    rig-spec plan <spec-name> --lite      (skip Q&A, generate tasks directly)"
     echo ""
     echo "  Available specs:"
     find "$RIG_DIR/feedforward/specs" -name "*.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | \
@@ -5169,12 +5425,13 @@ cmd_plan() {
     exit 1
   fi
 
-  # Normalize: allow "allow-multiple-consultations" or path-like input
+  # Normalize: strip extension and timestamp prefix for slug lookup
   spec_name=$(basename "$spec_name" .spec.md)
+  spec_name=$(echo "$spec_name" | sed -E 's/^[0-9]{8}-[0-9]{6}-//')
 
-  local spec_file="$RIG_DIR/feedforward/specs/${spec_name}.spec.md"
-  if [ ! -f "$spec_file" ]; then
-    print_err "Spec not found: $spec_file"
+  local spec_file
+  if ! spec_file=$(find_spec_file "$spec_name"); then
+    print_err "Spec not found for: $spec_name"
     echo ""
     echo "  rig-spec plan runs AFTER the spec exists. Create it first:"
     echo ""
@@ -5189,13 +5446,17 @@ cmd_plan() {
     if [ -n "$available" ]; then
       echo "  Specs in this project:"
       while IFS= read -r f; do
-        echo "    $(basename "$f" .spec.md)"
+        local fname
+        fname=$(basename "$f" .spec.md)
+        fname=$(echo "$fname" | sed -E 's/^[0-9]{8}-[0-9]{6}-//')
+        echo "    $fname"
       done <<< "$available"
       echo ""
     fi
     exit 1
   fi
 
+  # Use the slug without timestamp for the tasks directory
   local tasks_dir="$RIG_DIR/feedforward/tasks/${spec_name}"
   mkdir -p "$tasks_dir"
 
@@ -5204,6 +5465,11 @@ cmd_plan() {
 
   if [ "$phase" = "complete" ]; then
     cmd_plan_complete "$spec_name" "$spec_file" "$tasks_dir" "$qa_file"
+    return
+  fi
+
+  if [ "$phase" = "lite" ]; then
+    cmd_plan_lite "$spec_name" "$spec_file" "$tasks_dir"
     return
   fi
 
@@ -5385,18 +5651,18 @@ cmd_plan_complete() {
     echo "- Prefer sensors: test, endpoint (if API), standards-compliance, spec-compliance"
     echo ""
     echo "Sensor files — mandatory:"
-    echo "For every contract item that says '← verified by: [sensor]', output the sensor file:"
+    echo "For every contract item that says '← verified by: [sensor]', output the sensor file."
+    echo "Use YAML frontmatter for the command — it is unambiguous and parser-safe:"
     echo ""
     echo "  ## File: $RIG_DIR/feedback/sensors/[sensor-name].sensor.md"
     echo "  \`\`\`markdown"
-    echo "  # Sensor: [Name]"
-    echo "  **Type:** Computational"
-    echo "  **Timing:** After every task"
+    echo "  ---"
+    echo "  command: [exact command — e.g. npx tsc --noEmit, npm test, npx eslint src/]"
+    echo "  type: computational"
+    echo "  timing: after-task"
+    echo "  ---"
     echo ""
-    echo "  ## Command"
-    echo "  \`\`\`"
-    echo "  [exact command to run — e.g. npx tsc --noEmit, npm test, npx eslint src/]"
-    echo "  \`\`\`"
+    echo "  # Sensor: [Name]"
     echo ""
     echo "  ## Pass condition"
     echo "  Exit code 0."
@@ -5432,6 +5698,386 @@ cmd_plan_complete() {
   echo -e "  ${DIM}(Chat / Gemini / ChatGPT: copy each block and save manually)${RESET}"
   echo ""
   echo -e "  ${DIM}After saving sensor files, run: rig-spec sensors${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_plan_lite
+# ─────────────────────────────────────────────
+
+cmd_plan_lite() {
+  local spec_name="$1"
+  local spec_file="$2"
+  local tasks_dir="$3"
+
+  local plan_ts
+  plan_ts=$(task_ts_prefix)
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec plan — $spec_name${RESET} ${DIM}(lite: no Q&A, tasks generated directly)${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  local context_file="$RIG_DIR/context-plan-${spec_name}-lite.md"
+  {
+    echo "# Plan Tasks (lite): $spec_name"
+    echo ""
+    echo "> **Lite mode.** No Q&A phase. Generate task files directly."
+    echo "> Use this for small, well-understood changes only."
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Project Overview"
+    echo ""
+    cat "$RIG_DIR/HARNESS.md"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Feature Spec"
+    echo ""
+    cat "$spec_file"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Minimal Task Template"
+    echo ""
+    echo "Each task file must contain **only** these sections:"
+    echo ""
+    echo '```markdown'
+    echo "# Task [NN] — [Task Name]"
+    echo ""
+    echo "## What to Build"
+    echo ""
+    echo "[2-4 sentences describing the deliverable precisely.]"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## File Ownership"
+    echo ""
+    echo "> No other task may modify these files while this task is active."
+    echo ""
+    echo "- \`path/to/file.ext\`"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Contract — Definition of Done"
+    echo ""
+    echo "- [ ] [Specific deliverable] ← verified by: [test / typecheck / validator]"
+    echo "- [ ] No files outside file ownership were modified ← verified by: validator"
+    echo '```'
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Instructions"
+    echo ""
+    echo "Break the spec into the **minimum number of tasks** needed."
+    echo ""
+    echo "Rules:"
+    echo "- Use the minimal template above — no other sections"
+    echo "- Assign file ownership to every task"
+    echo "- Each contract item must have a verification method"
+    echo "- Aim for 1–4 tasks; if more are needed, question the 'lite' scope"
+    echo ""
+    echo "Output format — required:"
+    echo ""
+    echo "  ## File: $tasks_dir/${plan_ts}-01-[name].task.md"
+    echo "  \`\`\`markdown"
+    echo "  [minimal task content]"
+    echo "  \`\`\`"
+    echo ""
+    echo "File naming: ${plan_ts}-[NN]-[slug].task.md"
+    echo "  - Prefix ALL tasks with: ${plan_ts}"
+    echo "  - NN = zero-padded order: 01, 02, 03..."
+    echo ""
+    echo "Do not output anything outside these blocks except a one-line summary at the end."
+
+  } > "$context_file"
+
+  print_ok "Tasks folder: $tasks_dir"
+  print_ok "Context assembled: $context_file"
+  echo ""
+  echo "  cat $context_file  → paste into agent"
+  echo ""
+  echo -e "  ${DIM}Lite mode: agent generates tasks directly (no Q&A). Best for 1–4 task changes.${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_replan
+# ─────────────────────────────────────────────
+
+cmd_replan() {
+  require_rig
+  local spec_name="${1:-}"
+
+  if [ -z "$spec_name" ]; then
+    echo ""
+    print_err "Usage: rig-spec replan <spec-name>"
+    echo ""
+    echo "  Regenerates pending tasks for a spec after a pivot."
+    echo "  Completed tasks (marked ✅ or [x] in progress.md) are preserved."
+    echo ""
+    echo "  Available specs:"
+    find "$RIG_DIR/feedforward/specs" -name "*.spec.md" ! -name "_TEMPLATE*" 2>/dev/null | \
+      while IFS= read -r f; do echo "    $(basename "$f" .spec.md)"; done
+    echo ""
+    exit 1
+  fi
+
+  spec_name=$(basename "$spec_name" .spec.md)
+  spec_name=$(echo "$spec_name" | sed -E 's/^[0-9]{8}-[0-9]{6}-//')
+
+  local spec_file
+  if ! spec_file=$(find_spec_file "$spec_name"); then
+    print_err "Spec not found for: $spec_name"
+    exit 1
+  fi
+
+  local tasks_dir="$RIG_DIR/feedforward/tasks/${spec_name}"
+  local plan_ts
+  plan_ts=$(task_ts_prefix)
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec replan — $spec_name${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  # Collect existing tasks and their status from progress.md
+  local progress_file="$RIG_DIR/memory/progress.md"
+  local completed_tasks=""
+  local pending_tasks=""
+
+  # Find all task files for this spec
+  local all_task_files
+  all_task_files=$(find "$tasks_dir" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
+
+  if [ -n "$all_task_files" ]; then
+    while IFS= read -r tf; do
+      local tname
+      tname=$(basename "$tf")
+      # Consider a task completed if progress.md marks it with [x] or ✅
+      if [ -f "$progress_file" ] && grep -qE "(\[x\]|✅).*${tname%%.task.md}|${tname%%.task.md}.*(\[x\]|✅)" "$progress_file" 2>/dev/null; then
+        completed_tasks+="- ✅ $tname (completed — preserved, do not regenerate)"$'\n'
+      else
+        pending_tasks+="- ⏳ $tname (pending — may be replaced by the replan)"$'\n'
+      fi
+    done <<< "$all_task_files"
+  fi
+
+  local context_file="$RIG_DIR/context-replan-${spec_name}.md"
+  {
+    echo "# Replan Tasks: $spec_name"
+    echo ""
+    echo "> **Replan mode.** The original task breakdown for this spec needs revision."
+    echo "> Your job: generate a new task breakdown for the REMAINING work."
+    echo "> Do NOT touch or re-describe completed tasks."
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Project Overview"
+    echo ""
+    cat "$RIG_DIR/HARNESS.md"
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Current Feature Spec"
+    echo ""
+    cat "$spec_file"
+    echo ""
+    echo "---"
+    echo ""
+
+    if [ -f "$progress_file" ]; then
+      echo "## Current Progress"
+      echo ""
+      cat "$progress_file"
+      echo ""
+      echo "---"
+      echo ""
+    fi
+
+    echo "## Task Status"
+    echo ""
+    if [ -n "$completed_tasks" ]; then
+      echo "### Completed (DO NOT regenerate)"
+      echo ""
+      echo "$completed_tasks"
+    fi
+    if [ -n "$pending_tasks" ]; then
+      echo "### Pending (subject to replan)"
+      echo ""
+      echo "$pending_tasks"
+    fi
+    if [ -z "$completed_tasks" ] && [ -z "$pending_tasks" ]; then
+      echo "_No task files found in $tasks_dir — this is a full replan._"
+      echo ""
+    fi
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Your Instructions"
+    echo ""
+    echo "1. **Understand what changed:** Ask the human ONE question: 'What changed that requires a replan? (technical pivot, new constraint, discovery, etc.)'"
+    echo "   Wait for the answer before generating anything."
+    echo ""
+    echo "2. **Generate ONLY new/updated pending tasks** using the task template:"
+    echo ""
+    cat "$RIG_DIR/feedforward/tasks/_TEMPLATE.task.md" 2>/dev/null || echo "   (see $RIG_DIR/feedforward/tasks/_TEMPLATE.task.md)"
+    echo ""
+    echo "---"
+    echo ""
+    echo "Output format — required:"
+    echo ""
+    echo "  ## File: $tasks_dir/${plan_ts}-[NN]-[name].task.md"
+    echo "  \`\`\`markdown"
+    echo "  [full task content]"
+    echo "  \`\`\`"
+    echo ""
+    echo "File naming: ${plan_ts}-[NN]-[slug].task.md"
+    echo "  - Use new timestamp prefix for all replanned tasks: ${plan_ts}"
+    echo "  - Archive old pending tasks by prefixing their filename with 'archived-'"
+    echo ""
+    echo "After the replan, output a one-paragraph summary of:"
+    echo "  - What changed and why"
+    echo "  - Which tasks are new vs updated"
+    echo "  - Anything the human should know before resuming"
+
+  } > "$context_file"
+
+  print_ok "Context assembled: $context_file"
+  if [ -n "$completed_tasks" ]; then
+    print_ok "Completed tasks detected — preserved in context"
+  fi
+  if [ -n "$pending_tasks" ]; then
+    print_warn "Pending tasks will be subject to replan — review before accepting"
+  fi
+  echo ""
+  echo "  cat $context_file  → paste into agent"
+  echo ""
+  echo -e "  ${DIM}The agent will ask ONE question before replanning. Answer it to define the pivot.${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_archive
+# ─────────────────────────────────────────────
+
+cmd_archive() {
+  require_rig
+  local spec_name="${1:-}"
+
+  local progress="$RIG_DIR/memory/progress.md"
+
+  if [ -z "$spec_name" ]; then
+    echo ""
+    print_err "Usage: rig-spec archive <spec-name>"
+    echo ""
+    echo "  Archives a completed spec's section from progress.md to memory/archive/."
+    echo "  Keeps progress.md lean — completed features become a one-line reference."
+    echo ""
+    if [ -f "$progress" ]; then
+      echo "  Completed specs in progress.md:"
+      grep -E "^### " "$progress" 2>/dev/null | sed 's/^### /    /' || echo "    (none found)"
+    fi
+    echo ""
+    exit 1
+  fi
+
+  spec_name=$(basename "$spec_name" .spec.md)
+
+  if [ ! -f "$progress" ]; then
+    print_err "progress.md not found: $progress"
+    exit 1
+  fi
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec archive — $spec_name${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  local archive_dir="$RIG_DIR/memory/archive"
+  local archive_file="$archive_dir/$(today)-${spec_name}.md"
+  mkdir -p "$archive_dir"
+
+  # Extract the ### section matching the spec name (case-insensitive slug comparison)
+  local section_content
+  section_content=$(awk -v slug="$spec_name" '
+    function normalize(s,    r) {
+      r = tolower(s)
+      gsub(/[-_]/, " ", r)
+      gsub(/[^a-z0-9 ]/, "", r)
+      gsub(/  +/, " ", r)
+      return r
+    }
+    /^### / {
+      header = $0; sub(/^### /, "", header)
+      if (index(normalize(header), normalize(slug)) > 0) {
+        in_section = 1; print; next
+      } else if (in_section) {
+        exit
+      }
+    }
+    /^## / { if (in_section) exit }
+    in_section { print }
+  ' "$progress" 2>/dev/null)
+
+  if [ -z "$section_content" ]; then
+    print_warn "Section '### $spec_name' not found in progress.md."
+    echo ""
+    echo "  If the feature is tracked under a different name, archive manually:"
+    echo "  1. Copy the feature block from $progress"
+    echo "  2. Paste it into a new file: $archive_file"
+    echo "  3. Replace the block in progress.md with:"
+    echo "     ✅ $spec_name (archived $(today)) → memory/archive/$(today)-${spec_name}.md"
+    echo ""
+    exit 1
+  fi
+
+  # Write archive file
+  {
+    echo "# Archive: $spec_name"
+    echo ""
+    echo "**Archived:** $(today)"
+    echo "**Source:** memory/progress.md"
+    echo ""
+    echo "---"
+    echo ""
+    echo "$section_content"
+  } > "$archive_file"
+
+  # Remove the section from progress.md and insert a one-liner reference
+  local reference="✅ $spec_name (archived $(today)) → \`memory/archive/$(today)-${spec_name}.md\`"
+  local tmp_file
+  tmp_file=$(mktemp)
+  awk -v slug="$spec_name" -v ref="$reference" '
+    function normalize(s,    r) {
+      r = tolower(s)
+      gsub(/[-_]/, " ", r)
+      gsub(/[^a-z0-9 ]/, "", r)
+      gsub(/  +/, " ", r)
+      return r
+    }
+    /^### / {
+      header = $0; sub(/^### /, "", header)
+      if (index(normalize(header), normalize(slug)) > 0) {
+        in_section = 1
+        print ref
+        next
+      } else if (in_section) {
+        in_section = 0
+        print
+        next
+      }
+    }
+    /^## / { if (in_section) { in_section = 0 } }
+    !in_section { print }
+  ' "$progress" > "$tmp_file"
+  mv "$tmp_file" "$progress"
+
+  print_ok "Archived: $archive_file"
+  print_ok "progress.md updated — section replaced with one-liner reference"
+  echo ""
+  echo -e "  ${DIM}To review: cat $archive_file${RESET}"
   echo ""
 }
 
@@ -5478,8 +6124,11 @@ cmd_help() {
   echo "  research <topic>     Create a research file in memory/research/"
   echo "  shape <feature>      Phase 1: CLI questions + agent clarifying questions"
   echo "  shape <feature> --complete   Phase 2: agent writes full spec (after Q&A file)"
-  echo "  plan <spec-name>     Phase 1: agent planning questions before tasks"
+  echo "  plan <spec-name>             Phase 1: agent planning questions before tasks"
   echo "  plan <spec-name> --complete  Phase 2: agent creates tasks + sensors"
+  echo "  plan <spec-name> --lite      Skip Q&A, generate minimal tasks directly"
+  echo "  replan <spec-name>           Regenerate pending tasks after a pivot"
+  echo "  archive <spec-name>          Move completed spec out of progress.md to memory/archive/"
   echo ""
   echo -e "${BOLD}Other:${RESET}"
   echo "  version              Show version"
@@ -5512,6 +6161,8 @@ main() {
     research)     cmd_research "$@" ;;
     shape)        cmd_shape "$@" ;;
     plan)         cmd_plan "$@" ;;
+    replan)       cmd_replan "$@" ;;
+    archive)      cmd_archive "$@" ;;
     version|--version|-v)
                   echo "rig-spec $RIGSPEC_VERSION" ;;
     help|--help|-h)
