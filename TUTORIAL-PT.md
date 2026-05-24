@@ -247,29 +247,40 @@ Cada task vai ter:
 
 **Nome dos arquivos de task (ordem automática):**
 
-O `rig-spec plan` gera um prefixo com data/hora. Use este padrão:
+Cada spec tem sua pasta: `.rig/feedforward/tasks/<nome-da-spec>/`. O `rig-spec plan` usa timestamp + slug — **sem** `01`, `02`, `03` no nome:
 
 ```
-20260519-143052-01-dependencies.task.md
-20260519-143052-02-data-layer.task.md
-20260519-143052-03-ui-layer.task.md
+.rig/feedforward/tasks/sistema-de-notificacoes/
+  20260519-143052-dependencies.task.md
+  20260519-143053-data-layer.task.md
+  20260519-143054-ui-layer.task.md
 ```
 
-O timestamp na frente faz o `ls` e o `rig-spec done` respeitarem a ordem de execução. Para rodar, use o trecho único **se só existir uma task com esse nome no projeto**:
+Cada task seguinte soma **1 segundo** ao timestamp da anterior; assim `ls` e `rig-spec done` mantêm a ordem de execução.
+
+**O que executar primeiro?** Três lugares, em ordem de prioridade:
+
+| Onde | Papel |
+|------|--------|
+| `memory/progress.md` | Fonte da verdade — lista `[ ]` / `[~]` / `[x]` na ordem do plano |
+| `HARNESS.md` → **Next Task** | Atualizado por `rig-spec done` com a próxima task |
+| Seção **Dependencies** em cada `.task.md` | Ordem lógica entre tasks (paralelo vs sequencial) |
+
+Para rodar, use o **slug** (parte descritiva do nome):
 
 ```bash
-rig-spec run 01-dependencies
+rig-spec run dependencies
 ```
 
-Se duas features tiverem `01-data-layer`, o rig-spec **não adivinha** — ele lista as opções e pede o id qualificado:
+Se duas features tiverem o mesmo slug, use id qualificado:
 
 ```bash
-rig-spec run allow-multiple-consultations/01-data-layer
-# ou
-rig-spec run outra-feature/01-data-layer
+rig-spec run sistema-de-notificacoes/dependencies
 ```
 
-Com **Active Feature** definida no `HARNESS.md`, um fragmento ambíguo pode ser resolvido automaticamente para a feature ativa.
+Com **Active Feature** no `HARNESS.md`, um fragmento ambíguo pode ser resolvido para a feature ativa.
+
+**Resumo:** pasta = spec; timestamp = ordem no disco; `progress.md` = ordem humana; `rig-spec status` = visão rápida.
 
 ---
 
@@ -554,15 +565,15 @@ cat .rig/context-plan-nome-da-feature-complete.md
 Fase 2: o agente responde com um bloco por task:
 
 ```
-## File: .rig/feedforward/tasks/nome-da-feature/task-01-xxx.task.md
+## File: .rig/feedforward/tasks/nome-da-feature/20260519-143052-dependencies.task.md
 ```markdown
-# Task 01 — ...
+# Task — Dependencies
 ...conteúdo completo...
 ```
 
-## File: .rig/feedforward/tasks/nome-da-feature/task-02-xxx.task.md
+## File: .rig/feedforward/tasks/nome-da-feature/20260519-143053-data-layer.task.md
 ```markdown
-# Task 02 — ...
+# Task — Data layer
 ...
 ```
 ```

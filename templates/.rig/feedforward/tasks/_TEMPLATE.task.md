@@ -1,8 +1,8 @@
-# Task [XX] — [Task Name]
+# Task — [Task Name]
 
-> **Filename:** `YYYYMMDD-HHMMSS-[XX]-[slug].task.md` (timestamp first — keeps tasks sorted)
-> Example: `20260519-143052-01-dependencies.task.md`
-> Run with: `rig-spec run 01-dependencies` (partial match; if ambiguous use `feature-slug/01-dependencies`)
+> **Filename:** `YYYYMMDD-HHMMSS-[slug].task.md` (timestamp first — keeps tasks sorted)
+> Example: `20260519-143052-dependencies.task.md` (next: `20260519-143053-data-layer.task.md`, +1 second per task)
+> Run with: `rig-spec run dependencies` (partial match on slug; if ambiguous use `feature-slug/dependencies`)
 
 ---
 

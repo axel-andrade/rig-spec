@@ -46,6 +46,15 @@ today() { date +%Y-%m-%d; }
 # Prefix for new task files — sorts chronologically in directory listings
 task_ts_prefix() { date +%Y%m%d-%H%M%S; }
 
+# Add N seconds to YYYYMMDD-HHMMSS (for ordered task filenames without 01/02/03)
+task_ts_plus() {
+  local base="$1"
+  local offset="${2:-0}"
+  local ymd="${base:0:8}"
+  local hms="${base:9:6}"
+  date -d "${ymd} ${hms:0:2}:${hms:2:2}:${hms:4:2} + ${offset} seconds" +%Y%m%d-%H%M%S 2>/dev/null || echo "${base}"
+}
+
 # Active feature slug from HARNESS.md (narrows ambiguous task lookup)
 harness_active_feature() {
   local harness="$RIG_DIR/HARNESS.md"
@@ -896,11 +905,11 @@ EOF
 
 write_task_template() {
   cat > "$RIG_DIR/feedforward/tasks/_TEMPLATE.task.md" << 'EOF'
-# Task [XX] — [Task Name]
+# Task — [Task Name]
 
-> **Filename:** `YYYYMMDD-HHMMSS-[XX]-[slug].task.md` (timestamp first — keeps tasks sorted)
-> Example: `20260519-143052-01-dependencies.task.md`
-> Run with: `rig-spec run 01-dependencies` (partial match works)
+> **Filename:** `YYYYMMDD-HHMMSS-[slug].task.md` (timestamp first — keeps tasks sorted)
+> Example: `20260519-143052-dependencies.task.md` (next task: `20260519-143053-data-layer.task.md`, +1s each)
+> Run with: `rig-spec run dependencies` (partial match on slug; if ambiguous use `feature-slug/dependencies`)
 
 ---
 
@@ -4339,8 +4348,8 @@ cmd_run() {
     print_err "Usage: rig-spec run <task-id>"
     echo ""
     echo "  Examples:"
-    echo "    rig-spec run 01-data-layer"
-    echo "    rig-spec run allow-multiple-consultations/01-data-layer"
+    echo "    rig-spec run data-layer"
+    echo "    rig-spec run allow-multiple-consultations/data-layer"
     echo ""
     echo "  If two features have similar task names, use feature/fragment."
     echo ""
@@ -5630,21 +5639,24 @@ cmd_plan_complete() {
     echo "Output format — required:"
     echo "Output each task file AND its sensors using this exact structure:"
     echo ""
-    echo "  ## File: $tasks_dir/${plan_ts}-01-[name].task.md"
+    local ts2 ts3
+    ts2=$(task_ts_plus "$plan_ts" 1)
+    ts3=$(task_ts_plus "$plan_ts" 2)
+    echo "  ## File: $tasks_dir/${plan_ts}-[slug].task.md"
     echo "  \`\`\`markdown"
     echo "  [full task content here]"
     echo "  \`\`\`"
     echo ""
-    echo "  ## File: $tasks_dir/${plan_ts}-02-[name].task.md"
+    echo "  ## File: $tasks_dir/${ts2}-[slug].task.md"
     echo "  \`\`\`markdown"
     echo "  [full task content here]"
     echo "  \`\`\`"
     echo ""
-    echo "File naming (required): ${plan_ts}-[NN]-[slug].task.md"
-    echo "  - Use this plan timestamp prefix for ALL tasks: ${plan_ts}"
-    echo "  - NN = zero-padded order: 01, 02, 03..."
-    echo "  - Timestamp first so \`ls\` and \`rig-spec status\` stay in execution order"
-    echo "  - Run later with: rig-spec run 01-[slug] (partial id is enough)"
+    echo "File naming (required): YYYYMMDD-HHMMSS-[slug].task.md"
+    echo "  - First task: ${plan_ts}-[slug].task.md"
+    echo "  - Each next task: add 1 second to the timestamp (e.g. ${ts2}-..., ${ts3}-...)"
+    echo "  - No 01/02/03 prefix — timestamp alone defines execution order in \`ls\` and \`rig-spec done\`"
+    echo "  - Run later with: rig-spec run [slug] (partial match on slug is enough)"
     echo ""
     echo "Standards — mandatory:"
     echo "- List applicable files under '## Standards to Follow' in each task (see STANDARDS.md)"
@@ -5678,7 +5690,7 @@ cmd_plan_complete() {
 
   echo ""
   print_ok "Tasks folder created: $tasks_dir"
-  print_ok "Task name prefix for this plan: ${plan_ts}-[NN]-[slug].task.md"
+  print_ok "Task naming for this plan: ${plan_ts}-[slug].task.md (+1s per task for order)"
   print_ok "Context assembled: $context_file"
   echo ""
   echo -e "  ${BOLD}Next steps:${RESET}"
@@ -5744,7 +5756,7 @@ cmd_plan_lite() {
     echo "Each task file must contain **only** these sections:"
     echo ""
     echo '```markdown'
-    echo "# Task [NN] — [Task Name]"
+    echo "# Task — [Task Name]"
     echo ""
     echo "## What to Build"
     echo ""
@@ -5780,14 +5792,14 @@ cmd_plan_lite() {
     echo ""
     echo "Output format — required:"
     echo ""
-    echo "  ## File: $tasks_dir/${plan_ts}-01-[name].task.md"
+    echo "  ## File: $tasks_dir/${plan_ts}-[name].task.md"
     echo "  \`\`\`markdown"
     echo "  [minimal task content]"
     echo "  \`\`\`"
     echo ""
-    echo "File naming: ${plan_ts}-[NN]-[slug].task.md"
-    echo "  - Prefix ALL tasks with: ${plan_ts}"
-    echo "  - NN = zero-padded order: 01, 02, 03..."
+    echo "File naming: YYYYMMDD-HHMMSS-[slug].task.md"
+    echo "  - First task: ${plan_ts}-[slug].task.md"
+    echo "  - Each next task: +1 second on the timestamp (no 01/02/03 prefix)"
     echo ""
     echo "Do not output anything outside these blocks except a one-line summary at the end."
 
@@ -5928,13 +5940,14 @@ cmd_replan() {
     echo ""
     echo "Output format — required:"
     echo ""
-    echo "  ## File: $tasks_dir/${plan_ts}-[NN]-[name].task.md"
+    echo "  ## File: $tasks_dir/${plan_ts}-[name].task.md"
     echo "  \`\`\`markdown"
     echo "  [full task content]"
     echo "  \`\`\`"
     echo ""
-    echo "File naming: ${plan_ts}-[NN]-[slug].task.md"
-    echo "  - Use new timestamp prefix for all replanned tasks: ${plan_ts}"
+    echo "File naming: YYYYMMDD-HHMMSS-[slug].task.md"
+    echo "  - First replanned task: ${plan_ts}-[slug].task.md; +1 second per subsequent task"
+    echo "  - No 01/02/03 prefix in filenames"
     echo "  - Archive old pending tasks by prefixing their filename with 'archived-'"
     echo ""
     echo "After the replan, output a one-paragraph summary of:"
