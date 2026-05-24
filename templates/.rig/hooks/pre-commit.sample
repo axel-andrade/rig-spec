@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# rig-spec pre-commit hook (optional)
+#
+# Install (from project root):
+#   cp .rig/hooks/pre-commit.sample .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Or append to an existing pre-commit hook:
+#   rig-spec check --strict
+
+set -e
+
+if ! command -v rig-spec &>/dev/null; then
+  # Fallback: run from repo-relative rig-spec.sh if present
+  if [ -x "./rig-spec.sh" ]; then
+    ./rig-spec.sh check --strict
+    exit $?
+  fi
+  echo "rig-spec: command not found — skip state check (install rig-spec or add to PATH)"
+  exit 0
+fi
+
+rig-spec check --strict

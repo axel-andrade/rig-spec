@@ -41,7 +41,8 @@
 
 ## Dependencies
 
-- Task [XX] must be complete first (provides [what])
+- `feat-or-task-slug` must be complete first (provides [what])
+- Reference slugs in backticks — `rig-spec run` warns if not `[x]` in progress.md
 
 ## Enables
 

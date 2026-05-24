@@ -206,6 +206,11 @@ Chat sessions have a **limited context window**. Hallucination usually means the
 
 Human can trigger early: `rig-spec handoff` (assembles a save-state prompt).
 
+**End of every session (mandatory before stopping):**
+1. Check contract boxes in the task file for work that is truly done
+2. Update `memory/progress.md` (`[~]` / `[x]` and **Last Session** — must match reality)
+3. Ensure `HARNESS.md` **Active Feature** and **Next Task** match progress (human: `rig-spec sync`)
+
 **Forbidden:** continuing a large task in a degraded chat without saving progress.
 SESSION_EOF
 }
@@ -213,6 +218,161 @@ SESSION_EOF
 progress_has_checkpoint() {
   local progress="$RIG_DIR/memory/progress.md"
   [ -f "$progress" ] && grep -q '\[CHECKPOINT\]' "$progress" 2>/dev/null
+}
+
+# First [~] or [ ] task line in progress.md (source of truth when HARNESS is stale)
+progress_suggest_next_line() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+  grep -m1 -E '^- \[(~| )\] ' "$progress" 2>/dev/null || true
+}
+
+progress_suggest_task_id() {
+  local line
+  line=$(progress_suggest_next_line)
+  [ -z "$line" ] && return
+  echo "$line" | sed -E 's/^- \[(~|x| )\] //; s/:.*//; s/ ←.*//; s/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+progress_suggest_feature() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+  awk '
+    /^## Active Features/ { in_active=1; next }
+    /^## / { in_active=0 }
+    in_active && /^\*\*/ {
+      gsub(/^\*\*|\*\*$/, "", $0)
+      print $0
+      exit
+    }
+  ' "$progress" 2>/dev/null
+}
+
+task_contract_unchecked_count() {
+  local task_file="$1"
+  [ ! -f "$task_file" ] && echo 0 && return
+  awk '/^## Contract/{p=1; next} p && /^---/{exit} p && /^- \[ \]/{c++} END{print c+0}' "$task_file"
+}
+
+# Warn if lexicographically earlier tasks in the same feature are not [x] in progress.md
+task_warn_execution_order() {
+  local task_file="$1"
+  local progress="$RIG_DIR/memory/progress.md"
+  local task_dir feature
+  task_dir=$(dirname "$task_file")
+  feature=$(basename "$task_dir")
+  [ ! -f "$progress" ] && return
+
+  local sorted f base slug
+  sorted=$(find "$task_dir" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | sort)
+  while IFS= read -r f; do
+    [ "$f" = "$task_file" ] && break
+    base=$(basename "$f" .task.md)
+    slug="$base"
+    slug=$(echo "$slug" | sed -E 's/^[0-9]{8}-[0-9]{6}-//; s/^[0-9]{2}-//')
+    if ! grep -qE "^- \[x\].*(${base}|${slug})" "$progress" 2>/dev/null; then
+      print_warn "Order: earlier task not done — $base (still not [x] in progress.md)"
+      echo -e "  ${DIM}You may be skipping a dependency. Check ## Dependencies in the task file.${RESET}"
+    fi
+  done <<< "$sorted"
+}
+
+# Collect HARNESS vs progress drift messages into CHECK_ISSUES (global array)
+CHECK_ISSUES=()
+
+check_issue_add() {
+  CHECK_ISSUES+=("$1")
+}
+
+memory_drift_collect() {
+  local harness="$RIG_DIR/HARNESS.md"
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$harness" ] || [ ! -f "$progress" ] && return
+
+  local h_feature h_task p_feature p_task
+  h_feature=$(harness_active_feature)
+  h_task=$(grep -m1 '^\*\*Next Task:\*\*' "$harness" 2>/dev/null | sed 's/^\*\*Next Task:\*\*[[:space:]]*//')
+  p_feature=$(progress_suggest_feature)
+  p_task=$(progress_suggest_task_id)
+
+  if [ "$h_feature" = "none" ] && [ -n "$p_task" ]; then
+    check_issue_add "HARNESS Active Feature is 'none' but progress.md has pending work ($p_task)"
+  fi
+  if [ -n "$p_feature" ] && [ -n "$h_feature" ] && [ "$h_feature" != "none" ] && [ "$h_feature" != "$p_feature" ]; then
+    check_issue_add "HARNESS feature '$h_feature' ≠ progress suggests '$p_feature'"
+  fi
+  if [ -n "$p_task" ] && [ "$h_task" != "$p_task" ] && [[ "$h_task" != *"$p_task"* ]]; then
+    check_issue_add "HARNESS Next Task '$h_task' ≠ progress suggests '$p_task'"
+  fi
+}
+
+# Print warnings when HARNESS.md disagrees with progress.md
+print_memory_drift_warnings() {
+  CHECK_ISSUES=()
+  memory_drift_collect
+  local issue
+  for issue in "${CHECK_ISSUES[@]}"; do
+    print_warn "$issue"
+  done
+  if [ ${#CHECK_ISSUES[@]} -gt 0 ]; then
+    echo -e "  ${DIM}Fix: rig-spec sync  (or rig-spec run <task> updates focus automatically)${RESET}"
+    echo ""
+  fi
+}
+
+# Tasks marked [x] in progress.md but contract still has unchecked items
+check_done_tasks_with_open_contract() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+
+  local line task_id task_file open
+  while IFS= read -r line; do
+    task_id=$(echo "$line" | sed -E 's/^- \[x\] //; s/:.*//; s/ \(.*//; s/ ←.*//')
+    [ -z "$task_id" ] && continue
+    task_file=$(find_task_file "$task_id" 2>/dev/null) || task_file=""
+    [ -z "$task_file" ] || [ ! -f "$task_file" ] && continue
+    open=$(task_contract_unchecked_count "$task_file")
+    [ "${open:-0}" -gt 0 ] && \
+      check_issue_add "Task marked [x] in progress.md but contract has $open unchecked item(s): $task_id"
+  done < <(grep '^- \[x\]' "$progress" 2>/dev/null || true)
+}
+
+check_handoff_pending() {
+  [ -f "$RIG_DIR/.handoff-pending" ] && \
+    check_issue_add "Handoff was requested but may be incomplete (.rig/.handoff-pending exists)"
+}
+
+check_no_pending_work_listed() {
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$progress" ] && return
+  local pending
+  pending=$(grep -cE '^- \[( |~)\] ' "$progress" 2>/dev/null || echo 0)
+  local task_files
+  task_files=$(find "$RIG_DIR/feedforward/tasks" -name "*.task.md" ! -name "_TEMPLATE*" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${task_files:-0}" -gt 0 ] && [ "${pending:-0}" -eq 0 ]; then
+    local done_count
+    done_count=$(grep -c '^- \[x\]' "$progress" 2>/dev/null || echo 0)
+    [ "${done_count:-0}" -lt "${task_files:-0}" ] && \
+      check_issue_add "Task files exist but progress.md has no [ ] or [~] lines — list pending work"
+  fi
+}
+
+# Align HARNESS.md Current Focus with progress.md
+sync_harness_from_progress() {
+  local harness="$RIG_DIR/HARNESS.md"
+  local progress="$RIG_DIR/memory/progress.md"
+  [ ! -f "$harness" ] || [ ! -f "$progress" ] && return 1
+
+  local feature task
+  feature=$(progress_suggest_feature)
+  task=$(progress_suggest_task_id)
+
+  if [ -z "$task" ]; then
+    patch_harness_focus "${feature:-none}" "none — all tasks complete or update progress.md"
+    return 0
+  fi
+  patch_harness_focus "${feature:-none}" "$task"
+  return 0
 }
 
 shape_slugify() {
@@ -739,9 +899,21 @@ Short bullets only — patterns, gotchas, API quirks.
 
 ### 3. Task file checkboxes
 
-Check every contract item that is truly done in the `.task.md` file.
+Check every contract item that is truly done in the `.task.md` file (`- [ ]` → `- [x]`).
 
-### 4. Final chat line (exact)
+### 4. HARNESS.md
+
+Set **Active Feature** and **Next Task** to match progress.md (human: `rig-spec sync`).
+
+### 5. Session close ritual
+
+Before ending: contract boxes, progress.md, HARNESS aligned — see session-handoff.md.
+
+### 6. State check
+
+Run: `rig-spec sync` then `rig-spec check` (strict: `rig-spec check --strict`)
+
+### 7. Final chat line (exact)
 
 ```
 HANDOFF SAVED — close this chat and run: rig-spec resume
@@ -948,11 +1120,12 @@ write_task_template() {
 
 ## Dependencies
 
-- Task [XX] must be complete first (provides [what])
+- `feat-or-task-slug` must be complete first (provides [what])
+- Reference slugs in backticks — `rig-spec run` warns if not `[x]` in progress.md
 
 ## Enables
 
-- Task [XX+1] (needs [what this task produces])
+- `next-task-slug` (needs [what this task produces])
 
 ---
 
@@ -2537,8 +2710,10 @@ patch_progress_task_done() {
 
   local tmp
   tmp=$(mktemp)
-  # Replace pending task line with done marker if it exists
-  sed "s|- \[ \] \(.*${task_id}.*\)|- [x] \1|g" "$progress" > "$tmp" && mv "$tmp" "$progress"
+  # Replace pending or in-progress task line with done marker if it exists
+  sed -e "s|- \[ \] \(.*${task_id}.*\)|- [x] \1 ($(today))|g" \
+      -e "s|- \[~\] \(.*${task_id}.*\)|- [x] \1 ($(today))|g" \
+      "$progress" > "$tmp" && mv "$tmp" "$progress"
 }
 
 write_sensor_templates() {
@@ -3735,6 +3910,16 @@ cmd_status() {
   echo -e "  ${BOLD}Tasks:${RESET} $task_count total, $task_done completed"
   echo ""
 
+  print_memory_drift_warnings
+
+  # Suggested focus from progress.md (when HARNESS is stale)
+  local suggested_task
+  suggested_task=$(progress_suggest_task_id)
+  if [ -n "$suggested_task" ]; then
+    echo -e "  ${BOLD}progress.md suggests next:${RESET} $suggested_task"
+    echo ""
+  fi
+
   # Show Last Session block
   if grep -q "^## Last Session" "$progress"; then
     echo -e "  ${BOLD}Last session:${RESET}"
@@ -3773,6 +3958,115 @@ cmd_status() {
 }
 
 # ─────────────────────────────────────────────
+# cmd_sync — align HARNESS.md with progress.md
+# ─────────────────────────────────────────────
+
+cmd_sync() {
+  require_rig
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec sync${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  local progress="$RIG_DIR/memory/progress.md"
+  if [ ! -f "$progress" ]; then
+    print_err "No progress.md found."
+    exit 1
+  fi
+
+  CHECK_ISSUES=()
+  memory_drift_collect
+  if [ ${#CHECK_ISSUES[@]} -gt 0 ]; then
+    local issue
+    for issue in "${CHECK_ISSUES[@]}"; do
+      print_warn "$issue"
+    done
+    echo ""
+  fi
+
+  local before_feature before_task
+  before_feature=$(harness_active_feature)
+  before_task=$(grep -m1 '^\*\*Next Task:\*\*' "$RIG_DIR/HARNESS.md" 2>/dev/null | sed 's/^\*\*Next Task:\*\*[[:space:]]*//')
+
+  sync_harness_from_progress
+
+  local after_feature after_task
+  after_feature=$(harness_active_feature)
+  after_task=$(grep -m1 '^\*\*Next Task:\*\*' "$RIG_DIR/HARNESS.md" 2>/dev/null | sed 's/^\*\*Next Task:\*\*[[:space:]]*//')
+
+  print_ok "HARNESS.md updated"
+  echo -e "  ${BOLD}Active Feature:${RESET} $before_feature → $after_feature"
+  echo -e "  ${BOLD}Next Task:${RESET} $before_task → $after_task"
+  echo ""
+  echo -e "  ${DIM}progress.md remains the source of truth. Re-run rig-spec status to verify.${RESET}"
+  echo ""
+}
+
+# ─────────────────────────────────────────────
+# cmd_check — CI / pre-commit: fail when state is inconsistent
+# ─────────────────────────────────────────────
+
+cmd_check() {
+  require_rig
+  local strict=false
+  local do_fix=false
+  for arg in "$@"; do
+    case "$arg" in
+      --strict) strict=true ;;
+      --fix)    do_fix=true ;;
+      -h|--help)
+        echo ""
+        echo "Usage: rig-spec check [--strict] [--fix]"
+        echo ""
+        echo "  Verifies rig-spec state files are aligned. Exit 1 if any issue (for CI)."
+        echo ""
+        echo "  --strict   Also fail when [x] tasks have unchecked contract items"
+        echo "  --fix      Run rig-spec sync (HARNESS only) before checking again"
+        echo ""
+        exit 0
+        ;;
+    esac
+  done
+
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec check${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if $do_fix; then
+    print_step "Applying rig-spec sync..."
+    sync_harness_from_progress && print_ok "HARNESS.md synced from progress.md" || print_warn "sync skipped"
+    echo ""
+  fi
+
+  CHECK_ISSUES=()
+  memory_drift_collect
+  check_handoff_pending
+  check_no_pending_work_listed
+  $strict && check_done_tasks_with_open_contract
+
+  if [ ${#CHECK_ISSUES[@]} -eq 0 ]; then
+    print_ok "State check passed (HARNESS ↔ progress aligned)"
+    echo ""
+    exit 0
+  fi
+
+  print_err "${#CHECK_ISSUES[@]} issue(s) found:"
+  echo ""
+  local issue
+  for issue in "${CHECK_ISSUES[@]}"; do
+    echo -e "  ${RED}•${RESET} $issue"
+  done
+  echo ""
+  echo -e "  ${BOLD}Fix:${RESET}"
+  echo "    rig-spec sync              # align HARNESS with progress.md"
+  echo "    Update progress.md + task contract checkboxes"
+  echo "    rig-spec check --fix       # sync HARNESS then re-check"
+  echo ""
+  exit 1
+}
+
+# ─────────────────────────────────────────────
 # cmd_resume
 # ─────────────────────────────────────────────
 
@@ -3799,6 +4093,8 @@ cmd_resume() {
     echo "---"
     echo ""
   fi
+
+  print_memory_drift_warnings
 
   if [ -f "$RIG_DIR/memory/session-handoff.md" ]; then
     echo "## Session handoff rules"
@@ -3904,6 +4200,19 @@ cmd_session() {
     print_warn "Pending CHECKPOINT in memory/progress.md — use a new chat + rig-spec resume"
   fi
 
+  print_memory_drift_warnings
+
+  local unchecked=0
+  if [ -f "$RIG_DIR/.current-task" ]; then
+    local cur_file
+    cur_file=$(find_task_file "$(cat "$RIG_DIR/.current-task")" 2>/dev/null) || cur_file=""
+    if [ -n "$cur_file" ]; then
+      unchecked=$(task_contract_unchecked_count "$cur_file")
+      [ "${unchecked:-0}" -gt 0 ] && \
+        print_warn "Current task has $unchecked unchecked contract item(s) — mark [x] in the .task.md when done"
+    fi
+  fi
+
   if [ -f "$RIG_DIR/.handoff-pending" ]; then
     print_warn "Handoff requested — agent should save CHECKPOINT, then: rig-spec resume in new chat"
   fi
@@ -3986,11 +4295,12 @@ cmd_handoff() {
     echo ""
     echo "## Instructions"
     echo ""
-    echo "1. Read \`.rig/memory/session-handoff.md\`"
+    echo "1. Read \`.rig/memory/session-handoff.md\` (Session close ritual)"
     echo "2. Update \`.rig/memory/progress.md\` with a \`[CHECKPOINT]\` block under the active feature"
-    echo "3. Check completed items in the task file above"
-    echo "4. Append discoveries to \`.rig/memory/learnings.md\` if any"
-    echo "5. End your message with exactly:"
+    echo "3. Check completed items in the task file above (**every** done contract item → \`- [x]\`)"
+    echo "4. Sync HARNESS: set **Active Feature** and **Next Task** to match progress (human runs \`rig-spec sync\` after)"
+    echo "5. Append discoveries to \`.rig/memory/learnings.md\` if any"
+    echo "6. End your message with exactly:"
     echo ""
     echo "   HANDOFF SAVED — close this chat and run: rig-spec resume"
     echo ""
@@ -4393,6 +4703,10 @@ cmd_run() {
   print_ok "Task found: $task_file"
   echo -e "  ${DIM}Qualified id: ${feature_dir}/${task_short_id}${RESET}"
 
+  patch_harness_focus "$feature_dir" "$task_basename"
+  print_memory_drift_warnings
+  task_warn_execution_order "$task_file"
+
   # Dependency check — warn if any declared dependency is not done in progress.md
   local progress_file="$RIG_DIR/memory/progress.md"
   if [ -f "$progress_file" ]; then
@@ -4402,7 +4716,9 @@ cmd_run() {
       [ -z "$dep_line" ] && continue
       # Extract a task id fragment from the dependency line (first word-like slug after "Task" or at start)
       local dep_slug
-      dep_slug=$(echo "$dep_line" | grep -oE '[0-9]{8}-[0-9]{6}-[0-9]+-[a-z0-9-]+|[0-9]+-[a-z0-9-]+' | head -1)
+      dep_slug=$(echo "$dep_line" | sed -n 's/.*`\([^`]*\)`.*/\1/p' | head -1)
+      [ -z "$dep_slug" ] && dep_slug=$(echo "$dep_line" | grep -oE '[0-9]{8}-[0-9]{6}-[a-z0-9-]+' | head -1)
+      [ -z "$dep_slug" ] && dep_slug=$(echo "$dep_line" | grep -oE 'feat-[a-z0-9-]+|[a-z][a-z0-9-]{2,}' | head -1)
       [ -z "$dep_slug" ] && continue
       # Consider done if progress.md has [x] on a line containing the slug
       if ! grep -qE "^\- \[x\].*${dep_slug}" "$progress_file" 2>/dev/null; then
@@ -4722,6 +5038,21 @@ cmd_done() {
   if [ -n "$task_file" ]; then
     feature=$(basename "$(dirname "$task_file")")
     print_ok "Task found: $task_file"
+    local open_contract
+    open_contract=$(task_contract_unchecked_count "$task_file")
+    if [ "${open_contract:-0}" -gt 0 ]; then
+      echo ""
+      print_warn "$open_contract contract item(s) still unchecked in the task file"
+      echo -e "  ${DIM}Mark each done item as \`- [x]\` before rig-spec done, or confirm you accept closing anyway.${RESET}"
+      read -r -p "  Mark task done anyway? [y/N] " _done_confirm
+      if [[ ! "$_done_confirm" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "  Update the task contract, then: rig-spec done $task_id"
+        echo ""
+        exit 1
+      fi
+      echo ""
+    fi
   else
     print_warn "Task file not found for '$task_id' — updating progress without task reference"
   fi
@@ -4744,9 +5075,11 @@ cmd_done() {
 
   # Update progress.md
   patch_progress_task_done "$task_id" "$feature"
+  local whats_next="$next_task"
+  [ "$whats_next" = "none — all tasks complete" ] && whats_next="Feature complete — run rig-spec validate; update Last Session; rig-spec archive if shipping"
   patch_progress_last_session \
     "Completed and marked $task_id as done." \
-    "${next_task:-none}"
+    "$whats_next"
   print_ok "progress.md updated"
 
   # Update HARNESS.md next task
@@ -4789,11 +5122,14 @@ cmd_done() {
     fi
   fi
 
+  sync_harness_from_progress 2>/dev/null || true
+
   if [ "$next_task" != "none" ] && [ "$next_task" != "none — all tasks complete" ]; then
     echo ""
     echo -e "  ${BOLD}Next task:${RESET} $next_task"
     echo ""
     echo -e "  ${BOLD}rig-spec run $next_task${RESET}"
+    echo -e "  ${DIM}State guard: rig-spec check  (CI: rig-spec check --strict)${RESET}"
   else
     echo ""
     echo -e "  ${GREEN}${BOLD}All tasks in '$feature' are complete.${RESET}"
@@ -6124,6 +6460,8 @@ cmd_help() {
   echo -e "${BOLD}Workflow:${RESET}"
   echo "  overview             Show project vision, business rules, and current state"
   echo "  status               Show current project state (specs, tasks, sensors)"
+  echo "  sync                 Align HARNESS.md Active Feature / Next Task with progress.md"
+  echo "  check [--strict]     Fail (exit 1) if HARNESS ≠ progress; use in CI / pre-commit"
   echo "  resume               Context for a NEW chat (after handoff or between tasks)"
   echo "  handoff [task-id]    Prompt agent to save CHECKPOINT and end session"
   echo "  session              Show current task + when to hand off"
@@ -6163,6 +6501,8 @@ main() {
     init)         cmd_init "$@" ;;
     overview)     cmd_overview ;;
     status)       cmd_status ;;
+    sync)         cmd_sync ;;
+    check)        cmd_check "$@" ;;
     resume)       cmd_resume ;;
     handoff)      cmd_handoff "$@" ;;
     session)      cmd_session ;;

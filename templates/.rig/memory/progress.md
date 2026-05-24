@@ -59,3 +59,5 @@ Use this format when updating:
 - `[x]` — complete (task-level, set by `rig-spec done`)
 
 After each contract item: check its box in the task file AND add/update the sub-item under `[~]` in this file. The sub-list is what allows the next agent to continue without re-reading the whole task.
+
+**Maintenance:** `progress.md` is the source of truth. **Last Session** must match what you will do next — not what you planned two features ago. After each session: `rig-spec sync` so HARNESS.md matches this file.

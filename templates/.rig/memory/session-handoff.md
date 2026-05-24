@@ -39,9 +39,33 @@ Short bullets only — patterns, gotchas, API quirks.
 
 ### 3. Task file checkboxes
 
-Check every contract item that is truly done in the `.task.md` file.
+Check every contract item that is truly done in the `.task.md` file (`- [ ]` → `- [x]`). Unchecked boxes after `rig-spec done` break the feedback loop.
 
-### 4. Final chat line (exact)
+### 4. HARNESS.md (same session or human runs `rig-spec sync`)
+
+Set **Active Feature** and **Next Task** to match `progress.md` — not `none` while work is pending.
+
+### 5. Session close ritual (end of feature or long session)
+
+Before closing the chat:
+
+- [ ] Contract items done → checked in the `.task.md`
+- [ ] `progress.md` reflects reality (`[x]` / `[~]` / **Last Session**)
+- [ ] `HARNESS.md` **Active Feature** + **Next Task** aligned (`rig-spec sync`)
+- [ ] No stale CHECKPOINT unless you are mid-handoff
+
+### 6. State check (before final line)
+
+Human or agent runs from project root:
+
+```bash
+rig-spec sync
+rig-spec check
+```
+
+CI / strict repos: `rig-spec check --strict`
+
+### 7. Final chat line (exact)
 
 ```
 HANDOFF SAVED — close this chat and run: rig-spec resume

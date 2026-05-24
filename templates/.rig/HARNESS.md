@@ -29,6 +29,8 @@ Upgrade when you're ready: add the Phase 2 or Phase 3 files from the rig-spec te
 **Active Feature:** none
 **Next Task:** none
 
+> Updated automatically by `rig-spec run` and `rig-spec done`. If stale, run `rig-spec sync` (reads `memory/progress.md`).
+
 → Create your first spec: `feedforward/specs/_TEMPLATE.spec.md`
 
 ---

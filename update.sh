@@ -120,10 +120,12 @@ replace_framework_file() {
 }
 
 replace_framework_file "memory/bootstrap.md"
+replace_framework_file "memory/session-handoff.md"
 replace_framework_file "orchestration/implementer.md"
 replace_framework_file "orchestration/validator.md"
 replace_framework_file "feedback/sensors/_TEMPLATE.sensor.md"
 replace_framework_file "orchestration/contracts/_TEMPLATE.contract.md"
+replace_framework_file "feedforward/tasks/_TEMPLATE.task.md"
 
 # ─────────────────────────────────────────────
 # 2. New files — create only if absent
@@ -148,7 +150,7 @@ create_if_absent() {
 }
 
 create_if_absent "memory/learnings.md"
-create_if_absent "memory/session-handoff.md"
+create_if_absent "hooks/pre-commit.sample"
 
 # ─────────────────────────────────────────────
 # 3. Patch HARNESS.md — non-destructive
@@ -231,7 +233,24 @@ PYEOF
     fi
   fi
 
-  # 3c. Append Git Workflow section if missing
+  # 3c. Note about rig-spec sync under Current Focus if missing
+  if grep -q "rig-spec sync" "$HARNESS"; then
+    print_skip "Current Focus — sync note already present"
+    inc_skipped
+  elif grep -q "## Current Focus" "$HARNESS"; then
+    sed -i '/^\*\*Next Task:\*\*/a\
+\
+> Updated automatically by `rig-spec run` and `rig-spec done`. If stale, run `rig-spec sync` (reads `memory/progress.md`).' "$HARNESS"
+    if grep -q "rig-spec sync" "$HARNESS"; then
+      print_ok "Current Focus — sync note added"
+      inc_updated
+    else
+      print_skip "Current Focus — could not add sync note (add manually)"
+      inc_skipped
+    fi
+  fi
+
+  # 3d. Append Git Workflow section if missing
   if grep -q "## Git Workflow" "$HARNESS"; then
     print_skip "Git Workflow section — already present"
     inc_skipped
@@ -290,7 +309,20 @@ else
     inc_skipped
   fi
 
-  # 4b. Replace Template section if it has the old format (no [~] sub-list)
+  # 4b. Append maintenance note if missing
+  if ! grep -q "rig-spec sync" "$PROGRESS"; then
+    cat >> "$PROGRESS" << 'EOF'
+
+**Maintenance:** `progress.md` is the source of truth. **Last Session** must match what you will do next. After each session: `rig-spec sync` so HARNESS.md matches this file.
+EOF
+    print_ok "Maintenance note appended"
+    inc_updated
+  else
+    print_skip "Maintenance note — already present"
+    inc_skipped
+  fi
+
+  # 4c. Replace Template section if it has the old format (no [~] sub-list)
   if grep -q "task-02: ← NEXT" "$PROGRESS" && command -v python3 &>/dev/null; then
     python3 - "$PROGRESS" << 'PYEOF'
 import sys, re
