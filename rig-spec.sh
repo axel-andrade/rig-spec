@@ -209,7 +209,7 @@ Human can trigger early: `rig-spec handoff` (assembles a save-state prompt).
 **End of every session (mandatory before stopping):**
 1. Check contract boxes in the task file for work that is truly done
 2. Update `memory/progress.md` (`[~]` / `[x]` and **Last Session** — must match reality)
-3. Ensure `HARNESS.md` **Active Feature** and **Next Task** match progress (human: `rig-spec sync`)
+3. Run `rig-spec done <task>` or `rig-spec end` — **sync + check run automatically** (no need to call sync/check separately)
 
 **Forbidden:** continuing a large task in a degraded chat without saving progress.
 SESSION_EOF
@@ -355,6 +355,95 @@ check_no_pending_work_listed() {
     [ "${done_count:-0}" -lt "${task_files:-0}" ] && \
       check_issue_add "Task files exist but progress.md has no [ ] or [~] lines — list pending work"
   fi
+}
+
+auto_state_maintain_enabled() {
+  [ "${RIG_SPEC_AUTO_MAINTAIN:-1}" != "0" ]
+}
+
+# Run sync + check.collect. mode: warn | quiet | strict
+# warn/quiet: return 0 (never block). strict: return 1 if issues.
+auto_state_maintain() {
+  local mode="${1:-warn}"
+  local label="${2:-}"
+
+  auto_state_maintain_enabled || return 0
+
+  sync_harness_from_progress 2>/dev/null || true
+
+  CHECK_ISSUES=()
+  memory_drift_collect
+  check_handoff_pending
+  check_no_pending_work_listed
+  [ "$mode" = "strict" ] && check_done_tasks_with_open_contract
+
+  local n=${#CHECK_ISSUES[@]}
+  if [ "$n" -eq 0 ]; then
+    if [ "$mode" != "quiet" ]; then
+      if [ -n "$label" ]; then
+        print_ok "State synced — OK ($label)"
+      else
+        print_ok "State synced — OK"
+      fi
+    fi
+    return 0
+  fi
+
+  if [ "$mode" = "quiet" ]; then
+    return 1
+  fi
+
+  echo ""
+  if [ -n "$label" ]; then
+    echo -e "  ${BOLD}Auto state check ($label):${RESET}"
+  else
+    echo -e "  ${BOLD}Auto state check:${RESET}"
+  fi
+  local issue
+  for issue in "${CHECK_ISSUES[@]}"; do
+    print_warn "$issue"
+  done
+  echo -e "  ${DIM}HARNESS was synced from progress.md. Fix progress.md / contract boxes, then re-run.${RESET}"
+  echo -e "  ${DIM}Disable auto-maintain: RIG_SPEC_AUTO_MAINTAIN=0${RESET}"
+  echo ""
+
+  [ "$mode" = "strict" ] && return 1
+  return 0
+}
+
+# Append auto state report into a markdown file (for handoff context)
+auto_state_maintain_append_report() {
+  local dest="$1"
+  local mode="${2:-warn}"
+
+  auto_state_maintain_enabled || return 0
+
+  sync_harness_from_progress 2>/dev/null || true
+  CHECK_ISSUES=()
+  memory_drift_collect
+  check_handoff_pending
+  check_no_pending_work_listed
+  [ "$mode" = "strict" ] && check_done_tasks_with_open_contract
+
+  {
+    echo ""
+    echo "---"
+    echo ""
+    echo "## Auto state (rig-spec sync + check)"
+    echo ""
+    if [ ${#CHECK_ISSUES[@]} -eq 0 ]; then
+      echo "HARNESS.md aligned with progress.md. No drift detected."
+    else
+      echo "Issues to fix before ending the session:"
+      echo ""
+      local issue
+      for issue in "${CHECK_ISSUES[@]}"; do
+        echo "- $issue"
+      done
+      echo ""
+      echo "Agent: update progress.md and task contract checkboxes, then run \`rig-spec end\`."
+    fi
+  } >> "$dest"
 }
 
 # Align HARNESS.md Current Focus with progress.md
@@ -903,15 +992,13 @@ Check every contract item that is truly done in the `.task.md` file (`- [ ]` →
 
 ### 4. HARNESS.md
 
-Set **Active Feature** and **Next Task** to match progress.md (human: `rig-spec sync`).
-
 ### 5. Session close ritual
 
-Before ending: contract boxes, progress.md, HARNESS aligned — see session-handoff.md.
+Before ending: contract boxes + progress.md — see session-handoff.md.
 
-### 6. State check
+### 6. State check (automatic)
 
-Run: `rig-spec sync` then `rig-spec check` (strict: `rig-spec check --strict`)
+Human runs: `rig-spec end` (includes sync + check). Or `rig-spec done <task>` after a finished task.
 
 ### 7. Final chat line (exact)
 
@@ -4033,35 +4120,19 @@ cmd_check() {
   echo -e "${CYAN}──────────────────────────────────────${RESET}"
   echo ""
 
+  local mode="warn"
+  $strict && mode="strict"
+
   if $do_fix; then
-    print_step "Applying rig-spec sync..."
-    sync_harness_from_progress && print_ok "HARNESS.md synced from progress.md" || print_warn "sync skipped"
-    echo ""
+    sync_harness_from_progress 2>/dev/null || true
   fi
 
-  CHECK_ISSUES=()
-  memory_drift_collect
-  check_handoff_pending
-  check_no_pending_work_listed
-  $strict && check_done_tasks_with_open_contract
-
-  if [ ${#CHECK_ISSUES[@]} -eq 0 ]; then
-    print_ok "State check passed (HARNESS ↔ progress aligned)"
+  if auto_state_maintain "$mode" "rig-spec check"; then
     echo ""
     exit 0
   fi
 
-  print_err "${#CHECK_ISSUES[@]} issue(s) found:"
-  echo ""
-  local issue
-  for issue in "${CHECK_ISSUES[@]}"; do
-    echo -e "  ${RED}•${RESET} $issue"
-  done
-  echo ""
-  echo -e "  ${BOLD}Fix:${RESET}"
-  echo "    rig-spec sync              # align HARNESS with progress.md"
-  echo "    Update progress.md + task contract checkboxes"
-  echo "    rig-spec check --fix       # sync HARNESS then re-check"
+  echo -e "  ${BOLD}Fix:${RESET} update progress.md + task contracts, then rig-spec check"
   echo ""
   exit 1
 }
@@ -4225,6 +4296,7 @@ cmd_session() {
   echo ""
   echo -e "  ${BOLD}Commands:${RESET}"
   echo "    rig-spec handoff [task-id]   Save-state prompt for the current agent"
+  echo "    rig-spec end                 Auto sync + check before closing chat"
   echo "    rig-spec resume              Context for a **new** chat session"
   echo ""
 }
@@ -4298,8 +4370,8 @@ cmd_handoff() {
     echo "1. Read \`.rig/memory/session-handoff.md\` (Session close ritual)"
     echo "2. Update \`.rig/memory/progress.md\` with a \`[CHECKPOINT]\` block under the active feature"
     echo "3. Check completed items in the task file above (**every** done contract item → \`- [x]\`)"
-    echo "4. Sync HARNESS: set **Active Feature** and **Next Task** to match progress (human runs \`rig-spec sync\` after)"
-    echo "5. Append discoveries to \`.rig/memory/learnings.md\` if any"
+    echo "4. Append discoveries to \`.rig/memory/learnings.md\` if any"
+    echo "5. Human runs \`rig-spec end\` after you save (auto sync + check — see section below)"
     echo "6. End your message with exactly:"
     echo ""
     echo "   HANDOFF SAVED — close this chat and run: rig-spec resume"
@@ -4307,11 +4379,14 @@ cmd_handoff() {
     echo "**Forbidden:** starting new implementation in this chat after handoff."
   } > "$context_file"
 
+  auto_state_maintain_append_report "$context_file" "warn"
+
   patch_progress_last_session \
     "Handoff requested for $task_basename." \
-    "Agent saves CHECKPOINT → human runs rig-spec resume in a new chat"
+    "Agent saves CHECKPOINT → rig-spec end → rig-spec resume in new chat"
 
   print_ok "Handoff context: $context_file"
+  auto_state_maintain warn "after handoff"
   echo ""
   echo "  1. Paste into the **current** chat (agent saves state):"
   echo "     cat $context_file"
@@ -4560,9 +4635,36 @@ cmd_validate() {
       echo "  Fix the failures above, then re-run: rig-spec validate"
     fi
   fi
+
+  if [ "$failed" -eq 0 ]; then
+    auto_state_maintain warn "after validate"
+  fi
   echo ""
 
   return $failed
+}
+
+# ─────────────────────────────────────────────
+# cmd_end — session close (auto sync + strict check)
+# ─────────────────────────────────────────────
+
+cmd_end() {
+  require_rig
+  echo ""
+  echo -e "${BOLD}${CYAN}rig-spec end${RESET} ${DIM}(sync + check — run before closing a chat)${RESET}"
+  echo -e "${CYAN}──────────────────────────────────────${RESET}"
+  echo ""
+
+  if auto_state_maintain strict "session end"; then
+    rm -f "$RIG_DIR/.handoff-pending" 2>/dev/null || true
+    echo -e "  ${DIM}State is consistent. Safe to close this chat or run rig-spec resume next.${RESET}"
+    echo ""
+    exit 0
+  fi
+
+  echo -e "  ${BOLD}Fix the issues above, then run rig-spec end again.${RESET}"
+  echo ""
+  exit 1
 }
 
 # ─────────────────────────────────────────────
@@ -4883,7 +4985,9 @@ cmd_run() {
     echo "This is not optional. It is the mechanism that lets the next agent continue"
     echo "from exactly where you stopped — without re-reading the whole task."
     echo ""
-    echo "After implementation, human runs: rig-spec validate $task_id"
+    echo "After implementation: rig-spec validate $task_id  (auto sync + check)"
+    echo "When task is complete: rig-spec done $task_id  (auto sync + check)"
+    echo "End of session without a full task: rig-spec end"
     echo ""
     echo "If you cannot finish (context too full or task too large):"
     echo "1. Update memory/progress.md with the sub-item list showing exactly where you stopped"
@@ -4914,6 +5018,7 @@ cmd_run() {
   echo ""
   echo "     rig-spec validate"
   echo ""
+  auto_state_maintain warn "after run"
 }
 
 # ─────────────────────────────────────────────
@@ -5044,11 +5149,16 @@ cmd_done() {
       echo ""
       print_warn "$open_contract contract item(s) still unchecked in the task file"
       echo -e "  ${DIM}Mark each done item as \`- [x]\` before rig-spec done, or confirm you accept closing anyway.${RESET}"
-      read -r -p "  Mark task done anyway? [y/N] " _done_confirm
-      if [[ ! "$_done_confirm" =~ ^[Yy]$ ]]; then
-        echo ""
-        echo "  Update the task contract, then: rig-spec done $task_id"
-        echo ""
+      if [ -t 0 ]; then
+        read -r -p "  Mark task done anyway? [y/N] " _done_confirm
+        if [[ ! "$_done_confirm" =~ ^[Yy]$ ]]; then
+          echo ""
+          echo "  Update the task contract, then: rig-spec done $task_id"
+          echo ""
+          exit 1
+        fi
+      else
+        print_err "Contract has unchecked items — fix task file before rig-spec done (non-interactive)"
         exit 1
       fi
       echo ""
@@ -5122,14 +5232,13 @@ cmd_done() {
     fi
   fi
 
-  sync_harness_from_progress 2>/dev/null || true
+  auto_state_maintain warn "after done"
 
   if [ "$next_task" != "none" ] && [ "$next_task" != "none — all tasks complete" ]; then
     echo ""
     echo -e "  ${BOLD}Next task:${RESET} $next_task"
     echo ""
     echo -e "  ${BOLD}rig-spec run $next_task${RESET}"
-    echo -e "  ${DIM}State guard: rig-spec check  (CI: rig-spec check --strict)${RESET}"
   else
     echo ""
     echo -e "  ${GREEN}${BOLD}All tasks in '$feature' are complete.${RESET}"
@@ -6462,12 +6571,13 @@ cmd_help() {
   echo "  status               Show current project state (specs, tasks, sensors)"
   echo "  sync                 Align HARNESS.md Active Feature / Next Task with progress.md"
   echo "  check [--strict]     Fail (exit 1) if HARNESS ≠ progress; use in CI / pre-commit"
+  echo "  end                  Session close — auto sync + strict check (agent/human)"
   echo "  resume               Context for a NEW chat (after handoff or between tasks)"
   echo "  handoff [task-id]    Prompt agent to save CHECKPOINT and end session"
   echo "  session              Show current task + when to hand off"
   echo "  run <task-id>        Assemble task context for your AI agent"
   echo "  validate [task-id]     Run sensors + write feedback/reports/validation-*.md"
-  echo "  done <task-id>       Mark a task complete — updates progress.md and HARNESS.md"
+  echo "  done <task-id>       Mark task complete — auto sync + check (updates progress + HARNESS)"
   echo "  sensors              Check all sensor configurations are executable"
   echo "  audit                Run continuous drift sensors"
   echo ""
@@ -6503,6 +6613,7 @@ main() {
     status)       cmd_status ;;
     sync)         cmd_sync ;;
     check)        cmd_check "$@" ;;
+    end)          cmd_end ;;
     resume)       cmd_resume ;;
     handoff)      cmd_handoff "$@" ;;
     session)      cmd_session ;;

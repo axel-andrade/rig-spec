@@ -54,16 +54,17 @@ Before closing the chat:
 - [ ] `HARNESS.md` **Active Feature** + **Next Task** aligned (`rig-spec sync`)
 - [ ] No stale CHECKPOINT unless you are mid-handoff
 
-### 6. State check (before final line)
+### 6. State check (automatic)
 
-Human or agent runs from project root:
+From project root, human runs once (sync + check are **inside** this command):
 
 ```bash
-rig-spec sync
-rig-spec check
+rig-spec end
 ```
 
-CI / strict repos: `rig-spec check --strict`
+Or after a completed task: `rig-spec done <task-id>` (also runs sync + check).
+
+You do **not** need separate `rig-spec sync` and `rig-spec check` unless debugging.
 
 ### 7. Final chat line (exact)
 
